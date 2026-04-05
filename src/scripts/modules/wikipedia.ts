@@ -16,10 +16,30 @@ interface GeoSearchItem {
   pageid: number;
 }
 
+// Cache keyed by lat/lng rounded to 2 decimal places (~1.1km grid cells).
+// This prevents re-fetching when the map is panned only slightly or revisits an area.
+const cache = new Map<string, Record<number, WikiArticle>>();
+
+function cacheKey(latLng: google.maps.LatLng): string {
+  return `${latLng.lat().toFixed(2)},${latLng.lng().toFixed(2)}`;
+}
+
+export function clearCache(): void {
+  cache.clear();
+}
+
+export type WikiDataStatus = 'ok' | 'rate-limited' | 'error';
+
 export async function getWikipediaData(
   latLng: google.maps.LatLng,
   callback: (results: Record<number, WikiArticle>) => void
-): Promise<void> {
+): Promise<WikiDataStatus> {
+  const key = cacheKey(latLng);
+  if (cache.has(key)) {
+    callback(cache.get(key)!);
+    return 'ok';
+  }
+
   const numOfResults = 100;
   const searchRadius = 10000;
   const lat = latLng.lat();
@@ -32,18 +52,29 @@ export async function getWikipediaData(
     gscoord: `${lat}|${lng}`,
   });
 
-  let geoData: { error?: { info: string }; query: { geosearch: GeoSearchItem[] } };
+  let geoRes: Response;
   try {
-    const res = await fetch(`${geoUrl}&${geoParams}`);
-    geoData = await res.json();
+    geoRes = await fetch(`${geoUrl}&${geoParams}`);
   } catch (err) {
     console.error('Wikipedia geosearch failed:', err);
-    return;
+    return 'error';
+  }
+
+  if (geoRes.status === 429) {
+    return 'rate-limited';
+  }
+
+  let geoData: { error?: { info: string }; query: { geosearch: GeoSearchItem[] } };
+  try {
+    geoData = await geoRes.json();
+  } catch (err) {
+    console.error('Wikipedia geosearch failed:', err);
+    return 'error';
   }
 
   if (geoData.error) {
     console.error('Wikipedia error:', geoData.error.info);
-    return;
+    return 'error';
   }
 
   const items: Record<number, WikiArticle> = {};
@@ -75,5 +106,7 @@ export async function getWikipediaData(
     }
   }
 
+  cache.set(key, items);
   callback(items);
+  return 'ok';
 }

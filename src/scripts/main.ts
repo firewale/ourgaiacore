@@ -8,12 +8,12 @@ import * as map from './modules/map.js';
 
 async function initMap(): Promise<void> {
   const latLng = await geolocation.getCurrentPosition();
-  map.initialize(latLng, marker, wikipedia, search);
+  map.initialize(latLng, marker, wikipedia, search, import.meta.env.VITE_GOOGLE_MAPS_MAP_ID);
 }
 
 (window as unknown as { initMap: () => Promise<void> }).initMap = initMap;
 
 const script = document.createElement('script');
-script.src = `https://maps.googleapis.com/maps/api/js?key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}&callback=initMap`;
+script.src = `https://maps.googleapis.com/maps/api/js?key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}&libraries=marker&callback=initMap&loading=async`;
 script.defer = true;
 document.head.appendChild(script);

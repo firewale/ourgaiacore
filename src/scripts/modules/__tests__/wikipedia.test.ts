@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getWikipediaData } from '../wikipedia.js';
+import { getWikipediaData, clearCache, type WikiDataStatus } from '../wikipedia.js';
 
 class MockLatLng {
   constructor(private _lat: number, private _lng: number) {}
@@ -11,6 +11,7 @@ beforeEach(() => {
   vi.stubGlobal('google', {
     maps: { LatLng: MockLatLng },
   });
+  clearCache();
   vi.clearAllMocks();
 });
 
@@ -29,8 +30,8 @@ function makeExtractResponse(pageId: number, extract: string) {
 describe('getWikipediaData', () => {
   it('calls fetch with gscoord containing lat|lng', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ json: async () => makeGeoResponse([]) })
-      .mockResolvedValue({ json: async () => makeExtractResponse(1, '') });
+      .mockResolvedValueOnce({ status: 200, json: async () => makeGeoResponse([]) })
+      .mockResolvedValue({ status: 200, json: async () => makeExtractResponse(1, '') });
     vi.stubGlobal('fetch', fetchMock);
 
     const latLng = new MockLatLng(51.5, -0.12) as unknown as google.maps.LatLng;
@@ -42,7 +43,7 @@ describe('getWikipediaData', () => {
 
   it('includes origin=* in the geosearch request URL', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ json: async () => makeGeoResponse([]) });
+      .mockResolvedValueOnce({ status: 200, json: async () => makeGeoResponse([]) });
     vi.stubGlobal('fetch', fetchMock);
 
     const latLng = new MockLatLng(0, 0) as unknown as google.maps.LatLng;
@@ -52,44 +53,59 @@ describe('getWikipediaData', () => {
     expect(url).toContain('origin=*');
   });
 
-  it('invokes callback with mapped WikiArticle objects', async () => {
+  it('invokes callback with mapped WikiArticle objects and returns ok', async () => {
     const geoItems = [
       { title: 'Big Ben', lat: 51.5, lon: -0.12, pageid: 42 },
     ];
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ json: async () => makeGeoResponse(geoItems) })
-      .mockResolvedValueOnce({ json: async () => makeExtractResponse(42, 'Clock tower.') });
+      .mockResolvedValueOnce({ status: 200, json: async () => makeGeoResponse(geoItems) })
+      .mockResolvedValueOnce({ status: 200, json: async () => makeExtractResponse(42, 'Clock tower.') });
     vi.stubGlobal('fetch', fetchMock);
 
     const latLng = new MockLatLng(51.5, -0.12) as unknown as google.maps.LatLng;
     const callback = vi.fn();
-    await getWikipediaData(latLng, callback);
+    const status: WikiDataStatus = await getWikipediaData(latLng, callback);
 
+    expect(status).toBe('ok');
     expect(callback).toHaveBeenCalledOnce();
     const results = callback.mock.calls[0][0];
     expect(results[42]).toMatchObject({ title: 'Big Ben', lat: 51.5, long: -0.12, pageId: 42, extract: 'Clock tower.' });
   });
 
-  it('logs an error and does not call callback when Wikipedia returns an error', async () => {
+  it('returns rate-limited and does not call callback on a 429 response', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ status: 429 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const latLng = new MockLatLng(10, 10) as unknown as google.maps.LatLng;
+    const callback = vi.fn();
+    const status: WikiDataStatus = await getWikipediaData(latLng, callback);
+
+    expect(status).toBe('rate-limited');
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('logs an error and returns error when Wikipedia returns an API error', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
-      json: async () => ({ error: { info: 'Rate limited' } }),
+      status: 200,
+      json: async () => ({ error: { info: 'Bad request' } }),
     });
     vi.stubGlobal('fetch', fetchMock);
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const latLng = new MockLatLng(0, 0) as unknown as google.maps.LatLng;
     const callback = vi.fn();
-    await getWikipediaData(latLng, callback);
+    const status: WikiDataStatus = await getWikipediaData(latLng, callback);
 
-    expect(consoleSpy).toHaveBeenCalledWith('Wikipedia error:', 'Rate limited');
+    expect(status).toBe('error');
+    expect(consoleSpy).toHaveBeenCalledWith('Wikipedia error:', 'Bad request');
     expect(callback).not.toHaveBeenCalled();
   });
 
   it('handles missing extract gracefully', async () => {
     const geoItems = [{ title: 'Mystery', lat: 0, lon: 0, pageid: 99 }];
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ json: async () => makeGeoResponse(geoItems) })
-      .mockResolvedValueOnce({ json: async () => ({ query: { pages: { 99: {} } } }) });
+      .mockResolvedValueOnce({ status: 200, json: async () => makeGeoResponse(geoItems) })
+      .mockResolvedValueOnce({ status: 200, json: async () => ({ query: { pages: { 99: {} } } }) });
     vi.stubGlobal('fetch', fetchMock);
 
     const latLng = new MockLatLng(0, 0) as unknown as google.maps.LatLng;
@@ -98,5 +114,51 @@ describe('getWikipediaData', () => {
 
     const results = callback.mock.calls[0][0];
     expect(results[99].extract).toBeUndefined();
+  });
+});
+
+describe('caching', () => {
+  it('does not call fetch on a second request for the same location', async () => {
+    const geoItems = [{ title: 'Big Ben', lat: 51.5, lon: -0.12, pageid: 42 }];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ status: 200, json: async () => makeGeoResponse(geoItems) })
+      .mockResolvedValueOnce({ status: 200, json: async () => makeExtractResponse(42, 'Clock tower.') });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const latLng = new MockLatLng(51.5, -0.12) as unknown as google.maps.LatLng;
+    await getWikipediaData(latLng, vi.fn());
+    await getWikipediaData(latLng, vi.fn());
+
+    // fetch called for geo + 1 extract on first request only
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('serves cached results to the callback on a cache hit', async () => {
+    const geoItems = [{ title: 'Big Ben', lat: 51.5, lon: -0.12, pageid: 42 }];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ status: 200, json: async () => makeGeoResponse(geoItems) })
+      .mockResolvedValueOnce({ status: 200, json: async () => makeExtractResponse(42, 'Clock tower.') });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const latLng = new MockLatLng(51.5, -0.12) as unknown as google.maps.LatLng;
+    const callback = vi.fn();
+    await getWikipediaData(latLng, vi.fn());
+    await getWikipediaData(latLng, callback);
+
+    expect(callback).toHaveBeenCalledOnce();
+    expect(callback.mock.calls[0][0][42].title).toBe('Big Ben');
+  });
+
+  it('fetches again for a location that rounds to a different cache key', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValue({ status: 200, json: async () => makeGeoResponse([]) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const latLng1 = new MockLatLng(51.50, -0.12) as unknown as google.maps.LatLng;
+    const latLng2 = new MockLatLng(51.56, -0.12) as unknown as google.maps.LatLng; // rounds to 51.56
+    await getWikipediaData(latLng1, vi.fn());
+    await getWikipediaData(latLng2, vi.fn());
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

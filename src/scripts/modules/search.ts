@@ -1,6 +1,8 @@
 import * as geolocationModule from './geolocation.js';
+import { showBanner, hideBanner } from './banner.js';
 
 let geolocationLocal: typeof geolocationModule;
+let searchInputRef: HTMLInputElement;
 
 export function BuildSearchControl(
   controlDiv: HTMLDivElement,
@@ -17,16 +19,19 @@ export function BuildSearchControl(
 
   const controlstrip = document.getElementById('controlstrip') as HTMLElement;
   controlstrip.style.visibility = 'visible';
-  controlUI.appendChild(controlstrip);
 
-  const searchBox = document.getElementById('searchTerm') as HTMLInputElement;
+  // Capture references before moving controlstrip out of the document.
+  // After appendChild below, getElementById can no longer find these elements.
+  searchInputRef = document.getElementById('searchTerm') as HTMLInputElement;
   const searchButton = document.getElementById('searchButton') as HTMLButtonElement;
 
-  google.maps.event.addDomListener(searchButton, 'click', () => {
+  controlUI.appendChild(controlstrip);
+
+  searchButton.addEventListener('click', () => {
     void search(setLocationCallback);
   });
 
-  google.maps.event.addDomListener(searchBox, 'keypress', (e: KeyboardEvent) => {
+  searchInputRef.addEventListener('keypress', (e: KeyboardEvent) => {
     if (e.key !== 'Enter') return;
     void search(setLocationCallback);
   });
@@ -35,8 +40,7 @@ export function BuildSearchControl(
 async function search(
   setLocationCallback: (latLng: google.maps.LatLng) => void
 ): Promise<void> {
-  const searchInput = document.getElementById('searchTerm') as HTMLInputElement;
-  const searchTerm = searchInput.value.trim();
+  const searchTerm = searchInputRef.value.trim();
 
   if (!searchTerm) {
     console.error('No search term entered');
@@ -45,9 +49,11 @@ async function search(
 
   const result = await geolocationLocal.codeAddress(searchTerm);
   if (result.status === 'success') {
+    hideBanner();
     const latLng = new google.maps.LatLng(result.latitude, result.longitude);
     setLocationCallback(latLng);
   } else {
     console.error(`Could not resolve "${searchTerm}": ${result.message}`);
+    showBanner(`Could not find "${searchTerm}" — please try a different search term.`);
   }
 }
