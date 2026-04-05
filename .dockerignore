@@ -1,2 +1,12 @@
 node_modules
 npm-debug.log
+*.log
+.env
+server.key
+server.crt
+coverage
+dist
+.git
+.gitignore
+.aider*
+ReadMe.txt
