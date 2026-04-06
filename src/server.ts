@@ -6,6 +6,8 @@ import https from 'https';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { wikipediaRouter } from './routes/wikipedia.js';
+import { getRedisClient } from './lib/redisClient.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -15,6 +17,11 @@ app.use(helmet());
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use('/api/wikipedia', wikipediaRouter);
+
+// Eagerly initialize Redis so the connection can become ready before requests arrive.
+getRedisClient();
 
 // In production (after `npm run build`), serve the Vite-built client from dist/client/.
 // In dev, Vite's own dev server handles the frontend at :5173.

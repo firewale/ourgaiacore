@@ -33,6 +33,16 @@ A single-page web application that shows a Google Maps view centered on your loc
 
 ## Running Locally
 
+**Start Redis** (optional but recommended for caching):
+
+```bash
+docker run -p 6379:6379 redis
+```
+
+> If Redis is unavailable the server falls back to direct Wikipedia API calls with no caching.
+
+**Start the dev servers:**
+
 ```bash
 npm run dev
 ```
@@ -41,7 +51,7 @@ Open **`http://localhost:5173`** in your browser. Accept the location permission
 
 This starts two servers concurrently:
 - **Vite** on `http://localhost:5173` — serves the frontend with hot reload (use this for development)
-- **Express** on `http://localhost:8080` — available for any future API routes
+- **Express** on `http://localhost:8080` — handles API requests and Wikipedia data fetching
 
 ## Building for Production
 

@@ -26,6 +26,7 @@ Copy `.env.example` to `.env` before running locally. Required variables:
 - `VITE_GOOGLE_MAPS_API_KEY` — embedded into the frontend bundle by Vite at build time
 - `PORT` — HTTP port (default: 8080)
 - `HTTPS_PORT` — HTTPS port (default: 8443, only used if `server.key` + `server.crt` exist)
+- `REDIS_URL` — Redis connection string (default: `redis://localhost:6379`). If Redis is unavailable, the server falls back to direct Wikipedia API calls with no caching.
 
 ## Architecture
 
@@ -40,7 +41,7 @@ This is a single-page application (SPA) with a thin Express backend serving stat
 
 **Frontend module structure (`src/scripts/modules/`):**
 - `map.ts` — Google Maps initialization, marker plotting, map idle event handling, custom controls
-- `wikipedia.ts` — Wikipedia geosearch + extract API calls via native `fetch`; returns `WikiArticle` records
+- `wikipedia.ts` — Calls `/api/wikipedia` on the Express server; returns `WikiArticle` records. Has an in-memory cache keyed by rounded lat/lng as a first layer.
 - `geolocation.ts` — Browser geolocation and geocoder wrappers returning Promises
 - `marker.ts` — Google Maps marker/InfoWindow creation helpers
 - `search.ts` — Search control UI wired into the Google Maps control panel
