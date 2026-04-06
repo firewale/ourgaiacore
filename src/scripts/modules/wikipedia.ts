@@ -1,5 +1,4 @@
-const geoUrl = 'https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*';
-const extractUrl = 'https://en.wikipedia.org/w/api.php?format=json&action=query&prop=extracts&origin=*';
+const apiUrl = '/api/wikipedia';
 
 export interface WikiArticle {
   title: string;
@@ -7,13 +6,6 @@ export interface WikiArticle {
   long: number;
   pageId: number;
   extract?: string;
-}
-
-interface GeoSearchItem {
-  title: string;
-  lat: number;
-  lon: number;
-  pageid: number;
 }
 
 // Cache keyed by lat/lng rounded to 2 decimal places (~1.1km grid cells).
@@ -40,70 +32,28 @@ export async function getWikipediaData(
     return 'ok';
   }
 
-  const numOfResults = 100;
-  const searchRadius = 10000;
   const lat = latLng.lat();
   const lng = latLng.lng();
 
-  const geoParams = new URLSearchParams({
-    gslimit: String(numOfResults),
-    list: 'geosearch',
-    gsradius: String(searchRadius),
-    gscoord: `${lat}|${lng}`,
-  });
+  const params = new URLSearchParams({ lat: String(lat), lng: String(lng) });
 
-  let geoRes: Response;
+  let apiRes: Response;
   try {
-    geoRes = await fetch(`${geoUrl}&${geoParams}`);
+    apiRes = await fetch(`${apiUrl}?${params}`);
   } catch (err) {
-    console.error('Wikipedia geosearch failed:', err);
+    console.error('Wikipedia API request failed:', err);
     return 'error';
   }
 
-  if (geoRes.status === 429) {
-    return 'rate-limited';
-  }
+  if (apiRes.status === 429) return 'rate-limited';
+  if (!apiRes.ok) { console.error('Wikipedia API error:', apiRes.status); return 'error'; }
 
-  let geoData: { error?: { info: string }; query: { geosearch: GeoSearchItem[] } };
+  let items: Record<number, WikiArticle>;
   try {
-    geoData = await geoRes.json();
+    items = await apiRes.json() as Record<number, WikiArticle>;
   } catch (err) {
-    console.error('Wikipedia geosearch failed:', err);
+    console.error('Wikipedia API parse error:', err);
     return 'error';
-  }
-
-  if (geoData.error) {
-    console.error('Wikipedia error:', geoData.error.info);
-    return 'error';
-  }
-
-  const items: Record<number, WikiArticle> = {};
-  for (const item of geoData.query.geosearch) {
-    items[item.pageid] = {
-      title: item.title,
-      lat: item.lat,
-      long: item.lon,
-      pageId: item.pageid,
-    };
-  }
-
-  const extractResponses = await Promise.all(
-    Object.values(items).map(async (item) => {
-      const params = new URLSearchParams({ pageids: String(item.pageId) });
-      const res = await fetch(`${extractUrl}&${params}`);
-      return res.json() as Promise<{ query?: { pages?: Record<string, { extract?: string }> } }>;
-    })
-  );
-
-  for (const data of extractResponses) {
-    const pages = data?.query?.pages;
-    if (!pages) continue;
-    for (const [key, value] of Object.entries(pages)) {
-      const id = Number(key);
-      if (items[id]) {
-        items[id].extract = value.extract;
-      }
-    }
   }
 
   cache.set(key, items);
