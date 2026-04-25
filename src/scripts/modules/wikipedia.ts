@@ -1,11 +1,16 @@
 const apiUrl = '/api/wikipedia';
 
+export type ArticleCategory =
+  | 'museum' | 'church' | 'park' | 'historic'
+  | 'education' | 'transport' | 'default';
+
 export interface WikiArticle {
   title: string;
   lat: number;
   long: number;
   pageId: number;
   extract?: string;
+  category: ArticleCategory;
 }
 
 // Cache keyed by lat/lng rounded to 2 decimal places (~1.1km grid cells).

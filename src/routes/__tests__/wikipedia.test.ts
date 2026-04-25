@@ -27,8 +27,17 @@ function makeGeoResponse(items: Array<{ title: string; lat: number; lon: number;
   return { query: { geosearch: items } };
 }
 
-function makeExtractResponse(pageId: number, extract: string) {
-  return { query: { pages: { [pageId]: { extract } } } };
+function makeArticleResponse(pageId: number, extract: string, categories: string[] = []) {
+  return {
+    query: {
+      pages: {
+        [pageId]: {
+          extract,
+          categories: categories.map(title => ({ title })),
+        },
+      },
+    },
+  };
 }
 
 beforeEach(() => {
@@ -52,7 +61,7 @@ describe('GET /api/wikipedia', () => {
   });
 
   it('returns cached result from Redis without calling Wikipedia', async () => {
-    const cachedData = { 42: { title: 'Big Ben', lat: 51.5, long: -0.12, pageId: 42, extract: 'Clock tower.' } };
+    const cachedData = { 42: { title: 'Big Ben', lat: 51.5, long: -0.12, pageId: 42, extract: 'Clock tower.', category: 'historic' } };
     mockRedis.get.mockResolvedValueOnce(JSON.stringify(cachedData));
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -69,7 +78,7 @@ describe('GET /api/wikipedia', () => {
     mockRedis.get.mockResolvedValue(null);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([{ title: 'Big Ben', lat: 51.5, lon: -0.12, pageid: 42 }]) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeExtractResponse(42, 'Clock tower.') });
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeArticleResponse(42, 'Clock tower.') });
     vi.stubGlobal('fetch', fetchMock);
 
     const res = await request(makeApp()).get('/?lat=51.5&lng=-0.12');
@@ -77,18 +86,30 @@ describe('GET /api/wikipedia', () => {
     expect(res.status).toBe(200);
     expect(res.body[42].title).toBe('Big Ben');
     expect(res.body[42].extract).toBe('Clock tower.');
-    // Should cache the geo result and the extract
+    expect(res.body[42].category).toBe('default');
     const setexCalls = mockRedis.setex.mock.calls;
     const geoCacheCall = setexCalls.find(([key]) => (key as string).startsWith('wiki:geo:'));
     expect(geoCacheCall).toBeTruthy();
     expect(geoCacheCall![1]).toBe(86400); // 24h TTL
   });
 
-  it('serves extract from Redis cache and skips Wikipedia extract endpoint', async () => {
-    // geo cache miss, extract cache hit
+  it('classifies articles with known category keywords', async () => {
+    mockRedis.get.mockResolvedValue(null);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([{ title: 'Natural History Museum', lat: 51.5, lon: -0.17, pageid: 42 }]) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeArticleResponse(42, 'A museum.', ['Category:Museums in London']) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(makeApp()).get('/?lat=51.5&lng=-0.17');
+
+    expect(res.status).toBe(200);
+    expect(res.body[42].category).toBe('museum');
+  });
+
+  it('serves extract and category from Redis cache', async () => {
     mockRedis.get
-      .mockResolvedValueOnce(null)                      // geo cache miss
-      .mockResolvedValueOnce('Cached extract.');        // extract cache hit for pageId 42
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(JSON.stringify({ extract: 'Cached extract.', category: 'park' }));
 
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([{ title: 'Big Ben', lat: 51.5, lon: -0.12, pageid: 42 }]) });
@@ -98,15 +119,31 @@ describe('GET /api/wikipedia', () => {
 
     expect(res.status).toBe(200);
     expect(res.body[42].extract).toBe('Cached extract.');
-    // Only geosearch fetch; no extract fetch
+    expect(res.body[42].category).toBe('park');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back gracefully for legacy plain-string extract cache entries', async () => {
+    mockRedis.get
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('Legacy plain extract.');
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([{ title: 'Big Ben', lat: 51.5, lon: -0.12, pageid: 42 }]) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(makeApp()).get('/?lat=51.5&lng=-0.12');
+
+    expect(res.status).toBe(200);
+    expect(res.body[42].extract).toBe('Legacy plain extract.');
+    expect(res.body[42].category).toBe('default');
   });
 
   it('falls through to Wikipedia when Redis is unavailable', async () => {
     redisReady = false;
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([{ title: 'Big Ben', lat: 51.5, lon: -0.12, pageid: 42 }]) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeExtractResponse(42, 'Clock tower.') });
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeArticleResponse(42, 'Clock tower.') });
     vi.stubGlobal('fetch', fetchMock);
 
     const res = await request(makeApp()).get('/?lat=51.5&lng=-0.12');
@@ -135,11 +172,11 @@ describe('GET /api/wikipedia', () => {
     expect(res.status).toBe(502);
   });
 
-  it('returns articles even when an extract fetch fails', async () => {
+  it('returns articles even when an article fetch fails', async () => {
     mockRedis.get.mockResolvedValue(null);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([{ title: 'Big Ben', lat: 51.5, lon: -0.12, pageid: 42 }]) })
-      .mockRejectedValueOnce(new Error('extract fetch failed'));
+      .mockRejectedValueOnce(new Error('article fetch failed'));
     vi.stubGlobal('fetch', fetchMock);
 
     const res = await request(makeApp()).get('/?lat=51.5&lng=-0.12');
@@ -147,5 +184,6 @@ describe('GET /api/wikipedia', () => {
     expect(res.status).toBe(200);
     expect(res.body[42].title).toBe('Big Ben');
     expect(res.body[42].extract).toBeUndefined();
+    expect(res.body[42].category).toBe('default');
   });
 });
