@@ -53,6 +53,14 @@ const CATEGORY_RULES: Array<{ keywords: string[]; type: ArticleCategory }> = [
   { keywords: ['casinos in', 'entertainment venues', 'amusement parks', 'nightclubs'], type: 'entertainment' },
 ];
 
+function firstParagraph(html: string): string {
+  for (const match of html.matchAll(/<p[^>]*>[\s\S]*?<\/p>/gi)) {
+    const inner = match[0].replace(/<[^>]+>/g, '').trim();
+    if (inner) return match[0];
+  }
+  return html;
+}
+
 function classifyCategories(rawCategories: string[]): ArticleCategory {
   const lower = rawCategories.map(c => c.toLowerCase());
   for (const rule of CATEGORY_RULES) {
@@ -208,8 +216,9 @@ wikipediaRouter.get('/', async (req, res) => {
         const catCategory = classifyCategories(rawCats);
         article.category = catCategory !== 'default' ? catCategory : classifyByTitle(article.title);
         if (page.extract !== undefined) {
-          article.extract = page.extract;
-          newArticleData.set(article.pageId, { extract: page.extract, category: article.category });
+          const extract = firstParagraph(page.extract);
+          article.extract = extract;
+          newArticleData.set(article.pageId, { extract, category: article.category });
         }
       }
     } catch (err) {
