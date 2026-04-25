@@ -8,7 +8,7 @@ export function getCircleIcon(color: string = 'red'): google.maps.marker.PinElem
   });
 }
 
-const CATEGORY_STYLE: Record<ArticleCategory, { color: string; glyph: string }> = {
+export const CATEGORY_STYLE: Record<ArticleCategory, { color: string; glyph: string }> = {
   museum:    { color: '#9C27B0', glyph: '🏛' },
   worship:   { color: '#5C6BC0', glyph: '⛪' },
   park:      { color: '#388E3C', glyph: '🌳' },
