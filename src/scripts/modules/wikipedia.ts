@@ -1,8 +1,8 @@
 const apiUrl = '/api/wikipedia';
 
 export type ArticleCategory =
-  | 'museum' | 'church' | 'park' | 'historic'
-  | 'education' | 'transport' | 'default';
+  | 'museum' | 'worship' | 'park' | 'historic'
+  | 'education' | 'transport' | 'city' | 'demolished' | 'shopping' | 'ghost-town' | 'waterway' | 'neighborhood' | 'plane-crash' | 'hospital' | 'landform' | 'urban-legend' | 'food-and-drink' | 'art' | 'natural-disaster' | 'sport' | 'infrastructure' | 'event' | 'industry' | 'community' | 'maritime' | 'tech' | 'performing-arts' | 'trail' | 'recording-studio' | 'entertainment' | 'default';
 
 export interface WikiArticle {
   title: string;

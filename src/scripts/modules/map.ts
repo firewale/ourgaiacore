@@ -42,11 +42,16 @@ export function initialize(
 export function plotLandmarks(results: Record<number, wikipedia.WikiArticle>): void {
   Object.values(results).forEach((coord) => {
     const latLng = new google.maps.LatLng(coord.lat, coord.long);
+    const wikiUrl = `https://en.wikipedia.org/?curid=${coord.pageId}`;
+    const link = `<a href="${wikiUrl}" target="_blank" rel="noopener noreferrer">Read on Wikipedia</a>`;
+    const body = coord.extract
+      ? `${coord.extract}<br><br>${link}`
+      : `<strong>${coord.title}</strong><br><em>No description available.</em><br><br>${link}`;
     markerLocal.placeMapMarker(
       map,
       latLng,
       coord.title,
-      coord.extract ?? `<strong>${coord.title}</strong><br><em>No description available.</em>`,
+      body,
       markerLocal.getCategoryIcon(coord.category)
     );
   });
