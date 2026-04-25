@@ -1,8 +1,30 @@
+import type { ArticleCategory } from './wikipedia.js';
+
 export function getCircleIcon(color: string = 'red'): google.maps.marker.PinElement {
   return new google.maps.marker.PinElement({
     background: color,
     borderColor: 'white',
     glyphColor: 'white',
+  });
+}
+
+const CATEGORY_STYLE: Record<ArticleCategory, { color: string; glyph: string }> = {
+  museum:    { color: '#9C27B0', glyph: '🏛' },
+  church:    { color: '#5C6BC0', glyph: '⛪' },
+  park:      { color: '#388E3C', glyph: '🌳' },
+  historic:  { color: '#795548', glyph: '🏰' },
+  education: { color: '#0288D1', glyph: '🎓' },
+  transport: { color: '#F57C00', glyph: '🚉' },
+  default:   { color: '#546E7A', glyph: '?' },
+};
+
+export function getCategoryIcon(category: ArticleCategory = 'default'): google.maps.marker.PinElement {
+  const style = CATEGORY_STYLE[category] ?? CATEGORY_STYLE.default;
+  return new google.maps.marker.PinElement({
+    background: style.color,
+    borderColor: 'white',
+    glyphColor: 'white',
+    glyphText: style.glyph,
   });
 }
 

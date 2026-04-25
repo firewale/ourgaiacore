@@ -47,7 +47,7 @@ export function plotLandmarks(results: Record<number, wikipedia.WikiArticle>): v
       latLng,
       coord.title,
       coord.extract ?? `<strong>${coord.title}</strong><br><em>No description available.</em>`,
-      markerLocal.getCircleIcon('red')
+      markerLocal.getCategoryIcon(coord.category)
     );
   });
 }
