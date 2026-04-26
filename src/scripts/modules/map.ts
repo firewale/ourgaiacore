@@ -214,6 +214,7 @@ export function setMapOrigin(latLng: google.maps.LatLng): void {
 // Called from search — pans the map and lets the idle event handle the Wikipedia fetch.
 export function setPosition(latLng: google.maps.LatLng): void {
   if (!mapInitialized) initialize(latLng, markerLocal, wikipediaLocal, search);
+  map.setZoom(14);
   setMapOrigin(latLng);
 }
 
@@ -228,7 +229,8 @@ function setupClickEvents(): void {
 async function fetchWikipediaForCurrentView(): Promise<void> {
   const center = map.getCenter();
   if (!center) return;
-  const status = await wikipediaLocal.getWikipediaData(center, plotLandmarks);
+  const zoom = map.getZoom() ?? 14;
+  const status = await wikipediaLocal.getWikipediaData(center, zoom, plotLandmarks);
   if (status === 'rate-limited') {
     showBanner('Wikipedia is rate limiting requests — please wait 5 minutes before exploring further.', 300000);
   } else {

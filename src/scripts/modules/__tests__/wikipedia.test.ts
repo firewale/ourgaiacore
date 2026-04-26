@@ -28,12 +28,13 @@ describe('getWikipediaData', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const latLng = new MockLatLng(51.5, -0.12) as unknown as google.maps.LatLng;
-    await getWikipediaData(latLng, vi.fn());
+    await getWikipediaData(latLng, 14, vi.fn());
 
     const url = fetchMock.mock.calls[0][0] as string;
     expect(url).toContain('/api/wikipedia');
     expect(url).toContain('lat=51.5');
     expect(url).toContain('lng=-0.12');
+    expect(url).toContain('zoom=14');
   });
 
   it('invokes callback with mapped WikiArticle objects and returns ok', async () => {
@@ -45,7 +46,7 @@ describe('getWikipediaData', () => {
 
     const latLng = new MockLatLng(51.5, -0.12) as unknown as google.maps.LatLng;
     const callback = vi.fn();
-    const status: WikiDataStatus = await getWikipediaData(latLng, callback);
+    const status: WikiDataStatus = await getWikipediaData(latLng, 14, callback);
 
     expect(status).toBe('ok');
     expect(callback).toHaveBeenCalledOnce();
@@ -59,7 +60,7 @@ describe('getWikipediaData', () => {
 
     const latLng = new MockLatLng(10, 10) as unknown as google.maps.LatLng;
     const callback = vi.fn();
-    const status: WikiDataStatus = await getWikipediaData(latLng, callback);
+    const status: WikiDataStatus = await getWikipediaData(latLng, 14, callback);
 
     expect(status).toBe('rate-limited');
     expect(callback).not.toHaveBeenCalled();
@@ -71,7 +72,7 @@ describe('getWikipediaData', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const latLng = new MockLatLng(0, 0) as unknown as google.maps.LatLng;
-    const status: WikiDataStatus = await getWikipediaData(latLng, vi.fn());
+    const status: WikiDataStatus = await getWikipediaData(latLng, 14, vi.fn());
 
     expect(status).toBe('error');
     expect(consoleSpy).toHaveBeenCalled();
@@ -83,7 +84,7 @@ describe('getWikipediaData', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const latLng = new MockLatLng(0, 0) as unknown as google.maps.LatLng;
-    const status: WikiDataStatus = await getWikipediaData(latLng, vi.fn());
+    const status: WikiDataStatus = await getWikipediaData(latLng, 14, vi.fn());
 
     expect(status).toBe('error');
   });
@@ -97,7 +98,7 @@ describe('getWikipediaData', () => {
 
     const latLng = new MockLatLng(0, 0) as unknown as google.maps.LatLng;
     const callback = vi.fn();
-    await getWikipediaData(latLng, callback);
+    await getWikipediaData(latLng, 14, callback);
 
     const results = callback.mock.calls[0][0];
     expect(results[99].extract).toBeUndefined();
@@ -113,8 +114,8 @@ describe('caching', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const latLng = new MockLatLng(51.5, -0.12) as unknown as google.maps.LatLng;
-    await getWikipediaData(latLng, vi.fn());
-    await getWikipediaData(latLng, vi.fn());
+    await getWikipediaData(latLng, 14, vi.fn());
+    await getWikipediaData(latLng, 14, vi.fn());
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -128,8 +129,8 @@ describe('caching', () => {
 
     const latLng = new MockLatLng(51.5, -0.12) as unknown as google.maps.LatLng;
     const callback = vi.fn();
-    await getWikipediaData(latLng, vi.fn());
-    await getWikipediaData(latLng, callback);
+    await getWikipediaData(latLng, 14, vi.fn());
+    await getWikipediaData(latLng, 14, callback);
 
     expect(callback).toHaveBeenCalledOnce();
     expect(callback.mock.calls[0][0][42].title).toBe('Big Ben');
@@ -144,8 +145,8 @@ describe('caching', () => {
 
     const latLng1 = new MockLatLng(51.50, -0.12) as unknown as google.maps.LatLng;
     const latLng2 = new MockLatLng(51.56, -0.12) as unknown as google.maps.LatLng; // rounds to 51.56
-    await getWikipediaData(latLng1, vi.fn());
-    await getWikipediaData(latLng2, vi.fn());
+    await getWikipediaData(latLng1, 14, vi.fn());
+    await getWikipediaData(latLng2, 14, vi.fn());
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
