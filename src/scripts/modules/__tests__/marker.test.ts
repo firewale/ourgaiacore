@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getCircleIcon, placeMapMarker } from '../marker.js';
+import { getCircleIcon, placeMapMarker, _resetSharedInfoWindow } from '../marker.js';
 
 const mockOpen = vi.fn();
+const mockSetContent = vi.fn();
+const mockClose = vi.fn();
 const mockAddEventListener = vi.fn();
 const mockMapsEventAddListener = vi.fn();
 const mockPinElement = vi.fn((opts: { background?: string }) => ({
@@ -9,9 +11,10 @@ const mockPinElement = vi.fn((opts: { background?: string }) => ({
   background: opts?.background,
 }));
 const mockMarkerConstructor = vi.fn(() => ({ addEventListener: mockAddEventListener }));
-const mockInfoWindowConstructor = vi.fn(() => ({ open: mockOpen }));
+const mockInfoWindowConstructor = vi.fn(() => ({ open: mockOpen, setContent: mockSetContent, close: mockClose }));
 
 beforeEach(() => {
+  _resetSharedInfoWindow();
   vi.stubGlobal('google', {
     maps: {
       marker: {
@@ -78,14 +81,20 @@ describe('placeMapMarker', () => {
     );
   });
 
-  it('creates an InfoWindow and attaches a click listener when popupContent is provided', () => {
+  it('creates a shared InfoWindow and attaches a click listener when popupContent is provided', () => {
     placeMapMarker(mockMap, mockLatLng, 'With Popup', 'Some content');
-    expect(mockInfoWindowConstructor).toHaveBeenCalledWith({ content: 'Some content' });
     expect(mockAddEventListener).toHaveBeenCalledWith('gmp-click', expect.any(Function));
+  });
+
+  it('reuses the shared InfoWindow across multiple markers', () => {
+    placeMapMarker(mockMap, mockLatLng, 'Marker A', 'Content A', undefined, true);
+    placeMapMarker(mockMap, mockLatLng, 'Marker B', 'Content B', undefined, true);
+    expect(mockInfoWindowConstructor).toHaveBeenCalledTimes(1);
   });
 
   it('opens the InfoWindow immediately when startopen is true', () => {
     placeMapMarker(mockMap, mockLatLng, 'Open Now', 'Content', undefined, true);
+    expect(mockSetContent).toHaveBeenCalledWith('Content');
     expect(mockOpen).toHaveBeenCalled();
   });
 

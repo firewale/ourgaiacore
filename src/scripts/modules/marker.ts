@@ -52,6 +52,24 @@ export function getCategoryIcon(category: ArticleCategory = 'default'): google.m
   });
 }
 
+let sharedInfoWindow: google.maps.InfoWindow | null = null;
+
+function getSharedInfoWindow(): google.maps.InfoWindow {
+  if (!sharedInfoWindow) {
+    sharedInfoWindow = new google.maps.InfoWindow();
+    google.maps.event.addListener(sharedInfoWindow, 'domready', () => {
+      document.querySelector('.og-popup__close')?.addEventListener('click', () => {
+        sharedInfoWindow?.close();
+      });
+    });
+  }
+  return sharedInfoWindow;
+}
+
+export function _resetSharedInfoWindow(): void {
+  sharedInfoWindow = null;
+}
+
 export function placeMapMarker(
   map: google.maps.Map,
   latLng: google.maps.LatLng,
@@ -70,17 +88,17 @@ export function placeMapMarker(
 
   if (popupContent === undefined) return marker;
 
-  const infowindow = new google.maps.InfoWindow({ content: popupContent });
-
-  google.maps.event.addListener(infowindow, 'domready', () => {
-    document.querySelector('.og-popup__close')?.addEventListener('click', () => infowindow.close());
-  });
-
   marker.addEventListener('gmp-click', () => {
-    infowindow.open({ anchor: marker, map });
+    const iw = getSharedInfoWindow();
+    iw.setContent(popupContent);
+    iw.open({ anchor: marker, map });
   });
 
-  if (startopen) infowindow.open({ anchor: marker, map });
+  if (startopen) {
+    const iw = getSharedInfoWindow();
+    iw.setContent(popupContent);
+    iw.open({ anchor: marker, map });
+  }
 
   return marker;
 }
