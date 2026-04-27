@@ -71,7 +71,8 @@ describe('codeAddress', () => {
       );
     });
 
-    const result = await codeAddress('London');
+    // Use an address not in the hardcoded lookup table so the Geocoder mock is exercised
+    const result = await codeAddress('1 Infinite Loop, Cupertino');
     expect(result).toEqual({ status: 'success', latitude: 51.5, longitude: -0.12 });
   });
 

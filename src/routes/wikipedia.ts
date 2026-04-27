@@ -101,7 +101,12 @@ wikipediaRouter.get('/', async (req, res) => {
     return;
   }
 
-  const geoCacheKey = `wiki:geo:${lat.toFixed(2)}:${lng.toFixed(2)}`;
+  const zoomRaw = parseInt(req.query.zoom as string, 10);
+  const zoom = isNaN(zoomRaw) ? 14 : Math.max(1, Math.min(20, zoomRaw));
+  // Scale radius to match visible map area: zoom 14 → 5km, zoom 13 → 10km (max), below 13 → capped at 10km
+  const radius = Math.min(10000, Math.round(5000 * Math.pow(2, 14 - zoom)));
+
+  const geoCacheKey = `wiki:geo:${lat.toFixed(2)}:${lng.toFixed(2)}:${zoom}`;
 
   // Layer 1: Redis geo cache
   if (isRedisReady()) {
@@ -122,7 +127,7 @@ wikipediaRouter.get('/', async (req, res) => {
   const geoParams = new URLSearchParams({
     list: 'geosearch',
     gscoord: `${lat}|${lng}`,
-    gsradius: '10000',
+    gsradius: String(radius),
     gslimit: '100',
   });
 
