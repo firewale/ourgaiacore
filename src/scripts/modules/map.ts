@@ -17,6 +17,10 @@ const POPUP_STYLES = `<style>
     overflow: hidden !important;
     padding: 0 !important;
   }
+  /* Hide native close button — replaced by og-popup__close */
+  .gm-style-iw-chr {
+    display: none !important;
+  }
   .og-popup {
     font-family: 'Caveat', cursive;
     font-size: 16px;
@@ -38,8 +42,8 @@ const POPUP_STYLES = `<style>
       #daeaf7 24px
     );
     background-size: 100% 24px;
-    background-position: 0 6px;
-    padding: 6px 14px 14px 48px;
+    background-position: 0 22px;
+    padding: 16px 14px 14px 48px;
   }
   /* Red margin line */
   .og-popup__page::before {
@@ -52,28 +56,27 @@ const POPUP_STYLES = `<style>
     background: #e07070;
     opacity: 0.7;
   }
-  /* Top row: badge + button */
+  /* Top row: full-width header strip */
   .og-popup__toprow {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 5px;
+    background: #faf3e8;
+    border-radius: 3px 3px 0 0;
+    margin: -16px -14px 8px -48px;
+    padding: 8px 12px 8px 48px;
   }
   /* Category sticker */
-  .og-popup__badge {
-    display: inline-block;
-    background: var(--cat-color);
-    color: #fff;
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 10px;
-    font-weight: bold;
-    padding: 2px 8px;
-    border-radius: 2px;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    box-shadow: 1px 1px 3px rgba(0,0,0,0.25);
-    white-space: nowrap;
+  .og-popup__heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .og-popup__glyph {
+    font-size: 20px;
+    line-height: 24px;
+    flex-shrink: 0;
   }
   .og-popup__title {
     margin: 0 0 4px;
@@ -96,32 +99,53 @@ const POPUP_STYLES = `<style>
     font-style: italic;
   }
   .og-popup__btn {
-    display: inline-block;
-    background: var(--cat-color);
-    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    background: #fffef8;
+    color: #333;
     text-decoration: none;
     font-family: Arial, Helvetica, sans-serif;
     font-size: 10px;
     font-weight: bold;
-    padding: 2px 8px;
+    height: 24px;
+    padding: 0 12px;
     border-radius: 2px;
     letter-spacing: 0.03em;
     box-shadow: 1px 1px 3px rgba(0,0,0,0.25);
     white-space: nowrap;
   }
   .og-popup__btn:hover {
-    opacity: 0.85;
+    background: #f5f5f5;
+  }
+  .og-popup__btn img {
+    display: block;
+  }
+  .og-popup__close {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    background: #fffef8;
+    color: #333;
+    border: none;
+    cursor: pointer;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 12px;
+    font-weight: bold;
+    height: 24px;
+    padding: 0 12px;
+    border-radius: 2px;
+    box-shadow: 1px 1px 3px rgba(0,0,0,0.25);
+  }
+  .og-popup__close:hover {
+    background: #f5f5f5;
   }
 </style>`;
 
 function buildPopupContent(coord: wikipedia.WikiArticle): string {
   const style = marker.CATEGORY_STYLE[coord.category] ?? marker.CATEGORY_STYLE.default;
   const wikiUrl = `https://en.wikipedia.org/?curid=${coord.pageId}`;
-  const categoryLabel = coord.category
-    .split('-')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-  const badge = `<span class="og-popup__badge">${style.glyph} ${categoryLabel}</span>`;
   const bodyHtml = coord.extract ?? '<p>No description available.</p>';
   const bodyClass = coord.extract ? 'og-popup__body' : 'og-popup__body og-popup__body--empty';
 
@@ -130,10 +154,13 @@ function buildPopupContent(coord: wikipedia.WikiArticle): string {
 
   <div class="og-popup__page">
     <div class="og-popup__toprow">
-      ${badge}
-      <a class="og-popup__btn" href="${wikiUrl}" target="_blank" rel="noopener noreferrer">Read on Wikipedia</a>
+      <a class="og-popup__btn" href="${wikiUrl}" target="_blank" rel="noopener noreferrer"><img src="https://en.wikipedia.org/static/favicon/wikipedia.ico" width="12" height="12" alt="">Read Article</a>
+      <button class="og-popup__close">✕</button>
     </div>
-    <h3 class="og-popup__title">${coord.title}</h3>
+    <div class="og-popup__heading">
+      <span class="og-popup__glyph">${style.glyph}</span>
+      <h3 class="og-popup__title">${coord.title}</h3>
+    </div>
     <div class="${bodyClass}">${bodyHtml}</div>
   </div>
 </div>`;
@@ -198,8 +225,11 @@ export function setMapOrigin(latLng: google.maps.LatLng): void {
 <div class="og-popup" style="--cat-color:#1A73E8">
 
   <div class="og-popup__page">
-    <span class="og-popup__badge">📍 You are here</span>
-    <h3 class="og-popup__title">Welcome to OurGaia!</h3>
+    <div class="og-popup__toprow">
+      <span></span>
+      <button class="og-popup__close">✕</button>
+    </div>
+    <h3 class="og-popup__title">📍 Welcome to OurGaia!</h3>
     <div class="og-popup__body">
       <p>OurGaia places Wikipedia landmarks on the map around you — museums, parks, historic sites, transit stops, and more, each with its own colour and icon.</p>
       <p>Pan or zoom to explore a new area, use the search bar to jump to any city or address, or click any marker to read about it.</p>

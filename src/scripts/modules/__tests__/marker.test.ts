@@ -3,6 +3,7 @@ import { getCircleIcon, placeMapMarker } from '../marker.js';
 
 const mockOpen = vi.fn();
 const mockAddEventListener = vi.fn();
+const mockMapsEventAddListener = vi.fn();
 const mockPinElement = vi.fn((opts: { background?: string }) => ({
   element: document.createElement('div'),
   background: opts?.background,
@@ -18,6 +19,7 @@ beforeEach(() => {
         AdvancedMarkerElement: mockMarkerConstructor,
       },
       InfoWindow: mockInfoWindowConstructor,
+      event: { addListener: mockMapsEventAddListener },
     },
   });
   vi.clearAllMocks();

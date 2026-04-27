@@ -72,6 +72,10 @@ export function placeMapMarker(
 
   const infowindow = new google.maps.InfoWindow({ content: popupContent });
 
+  google.maps.event.addListener(infowindow, 'domready', () => {
+    document.querySelector('.og-popup__close')?.addEventListener('click', () => infowindow.close());
+  });
+
   marker.addEventListener('gmp-click', () => {
     infowindow.open({ anchor: marker, map });
   });
