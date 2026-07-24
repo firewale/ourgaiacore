@@ -48,7 +48,7 @@ export function getCategoryIcon(category: ArticleCategory = 'default'): google.m
     background: style.color,
     borderColor: 'white',
     glyphColor: 'white',
-    glyphText: style.glyph,
+    glyph: style.glyph,
   });
 }
 
