@@ -189,7 +189,7 @@ wikipediaRouter.get('/', async (req, res) => {
             } catch {
               // Legacy plain-string value — treat as extract only
               article.extract = cached;
-              article.category = 'default';
+              article.category = classifyByTitle(article.title);
               console.log(`[wiki] extract cache hit (legacy) for pageId ${article.pageId}`);
             }
             return;

@@ -3,6 +3,7 @@ import * as marker from './marker.js';
 import * as search from './search.js';
 import * as geolocation from './geolocation.js';
 import { showBanner, hideBanner } from './banner.js';
+import { buildLegend } from './legend.js';
 
 const POPUP_STYLES = `<style>
   @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&display=swap');
@@ -172,6 +173,15 @@ let wikipediaLocal: typeof wikipedia;
 let markerLocal: typeof marker;
 let idleDebounce: ReturnType<typeof setTimeout> | undefined;
 
+const markerRegistry = new Map<number, { marker: google.maps.marker.AdvancedMarkerElement; category: wikipedia.ArticleCategory }>();
+const hiddenCategories = new Set<wikipedia.ArticleCategory>();
+
+function filterByCategories(hidden: Set<wikipedia.ArticleCategory>): void {
+  markerRegistry.forEach(({ marker: m, category }) => {
+    m.map = hidden.has(category) ? null : map;
+  });
+}
+
 export function initialize(
   latLng: google.maps.LatLng,
   markerMod: typeof marker,
@@ -202,15 +212,29 @@ export function initialize(
 }
 
 export function plotLandmarks(results: Record<number, wikipedia.WikiArticle>): void {
+  markerRegistry.forEach((entry, pageId) => {
+    if (!(pageId in results)) {
+      entry.marker.map = null;
+      markerRegistry.delete(pageId);
+    }
+  });
+
   Object.values(results).forEach((coord) => {
+    if (markerRegistry.has(coord.pageId)) return;
+
     const latLng = new google.maps.LatLng(coord.lat, coord.long);
-    markerLocal.placeMapMarker(
+    const m = markerLocal.placeMapMarker(
       map,
       latLng,
       coord.title,
       buildPopupContent(coord),
       markerLocal.getCategoryIcon(coord.category)
     );
+    markerRegistry.set(coord.pageId, { marker: m, category: coord.category });
+
+    if (hiddenCategories.has(coord.category)) {
+      m.map = null;
+    }
   });
 }
 
@@ -276,4 +300,13 @@ function setupCustomControls(searchMod: typeof search): void {
 
   (homeDiv as HTMLDivElement & { index: number }).index = 1;
   map.controls[google.maps.ControlPosition.TOP_CENTER].push(homeDiv);
+
+  const legendDiv = document.createElement('div');
+  legendDiv.id = 'legendDiv';
+  buildLegend(legendDiv, (category, enabled) => {
+    const cat = category as wikipedia.ArticleCategory;
+    enabled ? hiddenCategories.delete(cat) : hiddenCategories.add(cat);
+    filterByCategories(hiddenCategories);
+  });
+  map.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(legendDiv);
 }
