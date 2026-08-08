@@ -1,4 +1,5 @@
 import { showBanner } from './banner.js';
+import * as mapContext from './mapContext.js';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -20,12 +21,19 @@ export async function sendMessage(
 ): Promise<ChatSendStatus> {
   history.push({ role: 'user', content });
 
+  const candidates = mapContext.getVisibleArticles().map(({ pageId, title, extract, category }) => ({
+    pageId,
+    title,
+    extract,
+    category,
+  }));
+
   let res: Response;
   try {
     res = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: history }),
+      body: JSON.stringify({ messages: history, candidates }),
     });
   } catch (err) {
     console.error('Chat API request failed:', err);
@@ -91,13 +99,32 @@ function appendMessageBubble(list: HTMLElement, role: ChatMessage['role'], conte
   return bubble;
 }
 
+function appendTypingIndicator(list: HTMLElement): HTMLElement {
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-message chat-message--assistant chat-message--typing';
+  for (let i = 0; i < 3; i++) {
+    const dot = document.createElement('span');
+    dot.className = 'chat-typing-dot';
+    bubble.appendChild(dot);
+  }
+  list.appendChild(bubble);
+  list.scrollTop = list.scrollHeight;
+  return bubble;
+}
+
 let pillRef: HTMLButtonElement | null = null;
 let winRef: HTMLElement | null = null;
+let messageListRef: HTMLElement | null = null;
 
 export function collapseChat(): void {
   if (!pillRef || !winRef) return;
   winRef.hidden = true;
   pillRef.hidden = false;
+}
+
+export function newChat(): void {
+  clearHistory();
+  if (messageListRef) messageListRef.innerHTML = '';
 }
 
 export function initialize(container: HTMLElement, onOpen?: () => void): void {
@@ -117,18 +144,30 @@ export function initialize(container: HTMLElement, onOpen?: () => void): void {
   title.id = 'chat-header-title';
   title.textContent = 'Chat';
 
+  const headerActions = document.createElement('div');
+  headerActions.id = 'chat-header-actions';
+
+  const newChatBtn = document.createElement('button');
+  newChatBtn.id = 'chat-new';
+  newChatBtn.textContent = '+';
+  newChatBtn.title = 'Start a new chat';
+
   const minimizeBtn = document.createElement('button');
   minimizeBtn.id = 'chat-minimize';
   minimizeBtn.textContent = '▼';
   minimizeBtn.title = 'Minimize chat';
 
+  headerActions.appendChild(newChatBtn);
+  headerActions.appendChild(minimizeBtn);
+
   header.appendChild(title);
-  header.appendChild(minimizeBtn);
+  header.appendChild(headerActions);
   win.appendChild(header);
 
   const messageList = document.createElement('div');
   messageList.id = 'chat-messages';
   win.appendChild(messageList);
+  messageListRef = messageList;
 
   const inputRow = document.createElement('div');
   inputRow.className = 'chat-input-row';
@@ -157,6 +196,10 @@ export function initialize(container: HTMLElement, onOpen?: () => void): void {
     pill.hidden = false;
   });
 
+  newChatBtn.addEventListener('click', () => {
+    newChat();
+  });
+
   async function send(): Promise<void> {
     const text = input.value.trim();
     if (!text) return;
@@ -165,11 +208,13 @@ export function initialize(container: HTMLElement, onOpen?: () => void): void {
     sendBtn.disabled = true;
     appendMessageBubble(messageList, 'user', text);
 
+    const typingBubble = appendTypingIndicator(messageList);
     let assistantBubble: HTMLElement | null = null;
 
     try {
       const status = await sendMessage(text, (fullText) => {
         if (!assistantBubble) {
+          typingBubble.remove();
           assistantBubble = appendMessageBubble(messageList, 'assistant', fullText);
         } else {
           assistantBubble.textContent = fullText;
@@ -177,6 +222,7 @@ export function initialize(container: HTMLElement, onOpen?: () => void): void {
         }
       });
       if (status === 'error') {
+        if (!assistantBubble) typingBubble.remove();
         showBanner('Chat is unavailable — check that Ollama is running.');
       }
     } finally {

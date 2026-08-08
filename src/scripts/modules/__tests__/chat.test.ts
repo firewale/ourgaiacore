@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { sendMessage, clearHistory, initialize, collapseChat, type ChatSendStatus } from '../chat.js';
+import { sendMessage, clearHistory, newChat, initialize, collapseChat, type ChatSendStatus } from '../chat.js';
+import { setVisibleArticles } from '../mapContext.js';
 
 function makeStreamingResponse(lines: string[], ok = true) {
   const encoder = new TextEncoder();
@@ -23,6 +24,7 @@ function makeStreamingResponse(lines: string[], ok = true) {
 
 beforeEach(() => {
   clearHistory();
+  setVisibleArticles([]);
   vi.clearAllMocks();
   document.body.innerHTML = '';
 });
@@ -40,6 +42,35 @@ describe('sendMessage', () => {
     expect(url).toBe('/api/chat');
     const body = JSON.parse(options.body as string);
     expect(body.messages).toEqual([{ role: 'user', content: 'Hello' }]);
+  });
+
+  it('sends an empty candidates array when no landmarks are visible', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      makeStreamingResponse(['{"content":"Hi there!"}\n'])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendMessage('Hello', vi.fn());
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.candidates).toEqual([]);
+  });
+
+  it('sends the currently visible landmarks as candidates', async () => {
+    setVisibleArticles([
+      { title: 'City Museum', lat: 1, long: 2, pageId: 42, extract: '<p>A museum.</p>', category: 'museum' },
+    ]);
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      makeStreamingResponse(['{"content":"Hi there!"}\n'])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendMessage('Tell me about the museum', vi.fn());
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.candidates).toEqual([
+      { pageId: 42, title: 'City Museum', extract: '<p>A museum.</p>', category: 'museum' },
+    ]);
   });
 
   it('invokes onUpdate with the accumulated text for each chunk and returns ok', async () => {
@@ -118,6 +149,20 @@ describe('sendMessage', () => {
     const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
     expect(secondBody.messages).toEqual([{ role: 'user', content: 'Fresh start' }]);
   });
+
+  it('newChat resets accumulated history', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(makeStreamingResponse(['{"content":"reply"}\n']))
+      .mockResolvedValueOnce(makeStreamingResponse(['{"content":"reply"}\n']));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendMessage('Hello', vi.fn());
+    newChat();
+    await sendMessage('Fresh start', vi.fn());
+
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(secondBody.messages).toEqual([{ role: 'user', content: 'Fresh start' }]);
+  });
 });
 
 describe('initialize', () => {
@@ -151,6 +196,35 @@ describe('initialize', () => {
     expect(pill.hidden).toBe(false);
   });
 
+  it('clicking the new-chat button clears rendered messages and history', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(makeStreamingResponse(['{"content":"Hi there!"}\n']))
+      .mockResolvedValueOnce(makeStreamingResponse(['{"content":"reply"}\n']));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const container = document.createElement('div');
+    initialize(container);
+    (container.querySelector('#chat-pill') as HTMLButtonElement).click();
+
+    const input = container.querySelector('#chat-input') as HTMLInputElement;
+    const sendBtn = container.querySelector('#chat-send') as HTMLButtonElement;
+    input.value = 'Hello';
+    sendBtn.click();
+
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll('#chat-messages .chat-message')).toHaveLength(2);
+    });
+
+    const newChatBtn = container.querySelector('#chat-new') as HTMLButtonElement;
+    newChatBtn.click();
+
+    expect(container.querySelectorAll('#chat-messages .chat-message')).toHaveLength(0);
+
+    await sendMessage('Fresh start', vi.fn());
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(secondBody.messages).toEqual([{ role: 'user', content: 'Fresh start' }]);
+  });
+
   it('calls onOpen when the pill is clicked', () => {
     const container = document.createElement('div');
     const onOpen = vi.fn();
@@ -159,6 +233,56 @@ describe('initialize', () => {
 
     pill.click();
     expect(onOpen).toHaveBeenCalledOnce();
+  });
+
+  it('shows a typing indicator while waiting for the first response chunk, then replaces it with the reply', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      makeStreamingResponse(['{"content":"Hi there!"}\n'])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const container = document.createElement('div');
+    initialize(container);
+    (container.querySelector('#chat-pill') as HTMLButtonElement).click();
+
+    const input = container.querySelector('#chat-input') as HTMLInputElement;
+    const sendBtn = container.querySelector('#chat-send') as HTMLButtonElement;
+    input.value = 'Hello';
+    sendBtn.click();
+
+    expect(container.querySelector('.chat-message--typing')).not.toBeNull();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('.chat-message--typing')).toBeNull();
+    });
+
+    const messages = container.querySelectorAll('#chat-messages .chat-message');
+    expect(messages).toHaveLength(2);
+    expect(messages[1].textContent).toBe('Hi there!');
+  });
+
+  it('removes the typing indicator without leaving a bubble when the request fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('network error')));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    document.body.innerHTML = '<div id="error-banner" hidden></div>';
+
+    const container = document.createElement('div');
+    initialize(container);
+    (container.querySelector('#chat-pill') as HTMLButtonElement).click();
+
+    const input = container.querySelector('#chat-input') as HTMLInputElement;
+    const sendBtn = container.querySelector('#chat-send') as HTMLButtonElement;
+    input.value = 'Hello';
+    sendBtn.click();
+
+    expect(container.querySelector('.chat-message--typing')).not.toBeNull();
+
+    await vi.waitFor(() => {
+      expect(sendBtn.disabled).toBe(false);
+    });
+
+    expect(container.querySelector('.chat-message--typing')).toBeNull();
+    expect(container.querySelectorAll('#chat-messages .chat-message')).toHaveLength(1);
   });
 
   it('collapseChat hides the window and shows the pill', () => {

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { selectRelevantContext, stripHtml, type RagCandidate } from '../lib/rag.js';
 
 export const chatRouter = Router();
 
@@ -6,7 +7,7 @@ const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'llama3.2';
 
 interface ChatMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
 }
 
@@ -14,6 +15,46 @@ function isValidMessage(message: unknown): message is ChatMessage {
   if (typeof message !== 'object' || message === null) return false;
   const { role, content } = message as Record<string, unknown>;
   return (role === 'user' || role === 'assistant') && typeof content === 'string' && content.trim().length > 0;
+}
+
+function isValidCandidate(candidate: unknown): candidate is RagCandidate {
+  if (typeof candidate !== 'object' || candidate === null) return false;
+  const { pageId, title, extract, category } = candidate as Record<string, unknown>;
+  return (
+    typeof pageId === 'number' &&
+    typeof title === 'string' &&
+    title.trim().length > 0 &&
+    (extract === undefined || typeof extract === 'string') &&
+    (category === undefined || typeof category === 'string')
+  );
+}
+
+async function buildOutgoingMessages(messages: ChatMessage[], rawCandidates: unknown): Promise<ChatMessage[]> {
+  const candidates = Array.isArray(rawCandidates) ? rawCandidates.filter(isValidCandidate) : [];
+  if (candidates.length === 0) return messages;
+
+  const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+  if (!lastUser) return messages;
+
+  const relevant = await selectRelevantContext(lastUser.content, candidates);
+  if (!relevant) return messages;
+
+  const contextText = relevant
+    .map((c) => {
+      const desc = c.extract ? stripHtml(c.extract).slice(0, 300) : 'No description available.';
+      return `- ${c.title}${c.category ? ` [${c.category}]` : ''}: ${desc}`;
+    })
+    .join('\n');
+
+  const systemMessage: ChatMessage = {
+    role: 'system',
+    content:
+      'You are a helpful assistant in OurGaia, a map app showing nearby Wikipedia landmarks. ' +
+      `Here are landmarks near the user that may be relevant to their question:\n${contextText}\n\n` +
+      'Use this context when relevant; otherwise answer normally.',
+  };
+
+  return [systemMessage, ...messages];
 }
 
 chatRouter.post('/', async (req, res) => {
@@ -27,12 +68,14 @@ chatRouter.post('/', async (req, res) => {
     return;
   }
 
+  const outgoingMessages = await buildOutgoingMessages(messages, req.body?.candidates);
+
   let ollamaRes: Response;
   try {
     ollamaRes = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_MODEL, messages, stream: true }),
+      body: JSON.stringify({ model: OLLAMA_MODEL, messages: outgoingMessages, stream: true }),
     });
   } catch {
     res.status(502).json({ error: 'Ollama request failed' });

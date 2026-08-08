@@ -73,6 +73,15 @@ const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
   'barcelona':      { lat: 41.3851,  lng: 2.1734    },
   // Africa
   'kigali':         { lat: -1.9441,  lng: 30.0619   },
+  // Rwanda — national parks & notable destinations.
+  // Akagera is anchored at Lake Ihema (inside the park) rather than the
+  // savanna interior, which has no nearby Wikipedia-geotagged articles.
+  'nyungwe':                 { lat: -2.5011, lng: 29.1978 },
+  'volcanoes national park': { lat: -1.4795, lng: 29.5074 },
+  'akagera national park':   { lat: -1.8633, lng: 30.8111 }, // Lake Ihema, inside the park
+  'lake kivu':               { lat: -1.7025, lng: 29.2564 },
+  'musanze':                 { lat: -1.4996, lng: 29.6339 },
+  'huye':                    { lat: -2.5967, lng: 29.7381 },
   'nairobi':        { lat: -1.2921,  lng: 36.8219   },
   'lagos':          { lat: 6.5244,   lng: 3.3792    },
   'cape town':      { lat: -33.9249, lng: 18.4241   },

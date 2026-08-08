@@ -5,6 +5,7 @@ import * as geolocation from './geolocation.js';
 import { showBanner, hideBanner } from './banner.js';
 import { buildLegend, collapseLegend } from './legend.js';
 import * as chat from './chat.js';
+import * as mapContext from './mapContext.js';
 
 const POPUP_STYLES = `<style>
   @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&display=swap');
@@ -213,6 +214,8 @@ export function initialize(
 }
 
 export function plotLandmarks(results: Record<number, wikipedia.WikiArticle>): void {
+  mapContext.setVisibleArticles(Object.values(results));
+
   markerRegistry.forEach((entry, pageId) => {
     if (!(pageId in results)) {
       entry.marker.map = null;
@@ -271,6 +274,7 @@ export function setPosition(latLng: google.maps.LatLng): void {
   if (!mapInitialized) initialize(latLng, markerLocal, wikipediaLocal, search);
   map.setZoom(14);
   setMapOrigin(latLng);
+  chat.newChat();
 }
 
 function setupClickEvents(): void {

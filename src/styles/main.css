@@ -252,6 +252,13 @@ html, body {
     font-size: clamp(13px, 0.85vmin, 22px);
 }
 
+#chat-header-actions {
+    display: flex;
+    align-items: center;
+    gap: clamp(2px, 0.2vmin, 6px);
+}
+
+#chat-new,
 #chat-minimize {
     font-family: Arial, sans-serif;
     background: none;
@@ -262,6 +269,7 @@ html, body {
     padding: 0 clamp(4px, 0.3vmin, 8px);
 }
 
+#chat-new:hover,
 #chat-minimize:hover {
     opacity: 0.6;
 }
@@ -293,6 +301,39 @@ html, body {
 .chat-message--assistant {
     align-self: flex-start;
     background: #f0f0f0;
+}
+
+.chat-message--typing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.chat-typing-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #999;
+    animation: chat-typing-bounce 1.2s infinite ease-in-out;
+}
+
+.chat-typing-dot:nth-child(2) {
+    animation-delay: 0.15s;
+}
+
+.chat-typing-dot:nth-child(3) {
+    animation-delay: 0.3s;
+}
+
+@keyframes chat-typing-bounce {
+    0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.5;
+    }
+    30% {
+        transform: translateY(-4px);
+        opacity: 1;
+    }
 }
 
 .chat-input-row {

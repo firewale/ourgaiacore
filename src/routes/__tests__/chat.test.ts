@@ -3,7 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
+vi.mock('../../lib/rag.js', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/rag.js')>('../../lib/rag.js');
+  return { ...actual, selectRelevantContext: vi.fn() };
+});
+
 const { chatRouter } = await import('../chat.js');
+const { selectRelevantContext } = await import('../../lib/rag.js');
+const selectRelevantContextMock = vi.mocked(selectRelevantContext);
 
 function makeApp() {
   const app = express();
@@ -87,6 +94,63 @@ describe('POST /api/chat', () => {
       messages: [{ role: 'user', content: 'Hi' }],
       stream: true,
     });
+  });
+
+  it('prepends a system message built from the relevant candidates when RAG context is found', async () => {
+    selectRelevantContextMock.mockResolvedValueOnce([
+      { pageId: 1, title: 'City Museum', extract: '<p>A museum of local history.</p>', category: 'museum' },
+    ]);
+    const body = makeStreamingBody(['{"message":{"content":"It\'s a museum."},"done":true}\n']);
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, body });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(makeApp())
+      .post('/')
+      .send({
+        messages: [{ role: 'user', content: 'Tell me about the museum' }],
+        candidates: [{ pageId: 1, title: 'City Museum', extract: '<p>A museum of local history.</p>', category: 'museum' }],
+      });
+
+    expect(res.status).toBe(200);
+    expect(selectRelevantContextMock).toHaveBeenCalledWith('Tell me about the museum', [
+      { pageId: 1, title: 'City Museum', extract: '<p>A museum of local history.</p>', category: 'museum' },
+    ]);
+
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(requestBody.messages).toHaveLength(2);
+    expect(requestBody.messages[0].role).toBe('system');
+    expect(requestBody.messages[0].content).toContain('City Museum');
+    expect(requestBody.messages[1]).toEqual({ role: 'user', content: 'Tell me about the museum' });
+  });
+
+  it('sends messages unchanged when no candidate clears the relevance threshold', async () => {
+    selectRelevantContextMock.mockResolvedValueOnce(null);
+    const body = makeStreamingBody(['{"message":{"content":"Sure."},"done":true}\n']);
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, body });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(makeApp())
+      .post('/')
+      .send({
+        messages: [{ role: 'user', content: 'Unrelated question' }],
+        candidates: [{ pageId: 1, title: 'City Museum', category: 'museum' }],
+      });
+
+    expect(res.status).toBe(200);
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(requestBody.messages).toEqual([{ role: 'user', content: 'Unrelated question' }]);
+  });
+
+  it('does not attempt retrieval when candidates is omitted', async () => {
+    const body = makeStreamingBody(['{"message":{"content":"Hi."},"done":true}\n']);
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, body });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await request(makeApp())
+      .post('/')
+      .send({ messages: [{ role: 'user', content: 'Hi' }] });
+
+    expect(selectRelevantContextMock).not.toHaveBeenCalled();
   });
 
   it('handles a chunk boundary that splits a JSON line', async () => {
