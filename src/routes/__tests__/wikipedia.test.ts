@@ -4,8 +4,8 @@ import express from 'express';
 import request from 'supertest';
 
 const mockRedis = {
-  get: vi.fn<() => Promise<string | null>>(),
-  setex: vi.fn<() => Promise<'OK'>>().mockResolvedValue('OK'),
+  get: vi.fn<[key: string], Promise<string | null>>(),
+  setex: vi.fn<[key: string, ttl: number, value: string], Promise<'OK'>>().mockResolvedValue('OK'),
 };
 let redisReady = true;
 

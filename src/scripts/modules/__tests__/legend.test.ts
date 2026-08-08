@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { buildLegend } from '../legend.js';
+import { buildLegend, collapseLegend } from '../legend.js';
 import { CATEGORY_STYLE } from '../marker.js';
 
 let container: HTMLElement;
@@ -121,5 +121,53 @@ describe('buildLegend', () => {
 
     allBtn.click();
     expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it('calls onOpen when the panel is opened but not when closed', () => {
+    const onOpen = vi.fn();
+    buildLegend(container, onToggle, onOpen);
+    const toggleBtn = container.querySelector('#legend-toggle') as HTMLButtonElement;
+
+    toggleBtn.click();
+    expect(onOpen).toHaveBeenCalledOnce();
+
+    toggleBtn.click();
+    expect(onOpen).toHaveBeenCalledOnce();
+  });
+
+  it('collapseLegend hides the panel', () => {
+    buildLegend(container, onToggle);
+    const toggleBtn = container.querySelector('#legend-toggle') as HTMLButtonElement;
+    const panel = container.querySelector('#legend') as HTMLElement;
+
+    toggleBtn.click();
+    expect(panel.hidden).toBe(false);
+
+    collapseLegend();
+    expect(panel.hidden).toBe(true);
+  });
+
+  it('flips the toggle button arrow to reflect open/closed state', () => {
+    buildLegend(container, onToggle);
+    const toggleBtn = container.querySelector('#legend-toggle') as HTMLButtonElement;
+
+    expect(toggleBtn.textContent).toBe('Legend ▲');
+
+    toggleBtn.click();
+    expect(toggleBtn.textContent).toBe('Legend ▼');
+
+    toggleBtn.click();
+    expect(toggleBtn.textContent).toBe('Legend ▲');
+  });
+
+  it('collapseLegend resets the toggle button arrow', () => {
+    buildLegend(container, onToggle);
+    const toggleBtn = container.querySelector('#legend-toggle') as HTMLButtonElement;
+
+    toggleBtn.click();
+    expect(toggleBtn.textContent).toBe('Legend ▼');
+
+    collapseLegend();
+    expect(toggleBtn.textContent).toBe('Legend ▲');
   });
 });
