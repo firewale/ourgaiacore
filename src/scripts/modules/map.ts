@@ -3,7 +3,9 @@ import * as marker from './marker.js';
 import * as search from './search.js';
 import * as geolocation from './geolocation.js';
 import { showBanner, hideBanner } from './banner.js';
-import { buildLegend } from './legend.js';
+import { buildLegend, collapseLegend } from './legend.js';
+import * as chat from './chat.js';
+import * as mapContext from './mapContext.js';
 
 const POPUP_STYLES = `<style>
   @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&display=swap');
@@ -212,6 +214,8 @@ export function initialize(
 }
 
 export function plotLandmarks(results: Record<number, wikipedia.WikiArticle>): void {
+  mapContext.setVisibleArticles(Object.values(results));
+
   markerRegistry.forEach((entry, pageId) => {
     if (!(pageId in results)) {
       entry.marker.map = null;
@@ -270,6 +274,7 @@ export function setPosition(latLng: google.maps.LatLng): void {
   if (!mapInitialized) initialize(latLng, markerLocal, wikipediaLocal, search);
   map.setZoom(14);
   setMapOrigin(latLng);
+  chat.newChat();
 }
 
 function setupClickEvents(): void {
@@ -301,12 +306,26 @@ function setupCustomControls(searchMod: typeof search): void {
   (homeDiv as HTMLDivElement & { index: number }).index = 1;
   map.controls[google.maps.ControlPosition.TOP_CENTER].push(homeDiv);
 
+  // Legend and chat share a single control slot so the browser's normal box layout
+  // stacks them, rather than relying on Maps to reposition sibling controls when one
+  // of them changes size (Maps computes each control's offset once and does not
+  // recompute it just because a child's `hidden` attribute toggles).
+  const bottomLeftDiv = document.createElement('div');
+  bottomLeftDiv.id = 'bottomLeftControls';
+
+  const chatDiv = document.createElement('div');
+  chatDiv.id = 'chatDiv';
+  chat.initialize(chatDiv, () => collapseLegend());
+  bottomLeftDiv.appendChild(chatDiv);
+
   const legendDiv = document.createElement('div');
   legendDiv.id = 'legendDiv';
   buildLegend(legendDiv, (category, enabled) => {
     const cat = category as wikipedia.ArticleCategory;
     enabled ? hiddenCategories.delete(cat) : hiddenCategories.add(cat);
     filterByCategories(hiddenCategories);
-  });
-  map.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(legendDiv);
+  }, () => chat.collapseChat());
+  bottomLeftDiv.appendChild(legendDiv);
+
+  map.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(bottomLeftDiv);
 }

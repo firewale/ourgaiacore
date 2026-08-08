@@ -6,13 +6,23 @@ function formatLabel(key: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+let panelRef: HTMLElement | null = null;
+let toggleBtnRef: HTMLButtonElement | null = null;
+
+export function collapseLegend(): void {
+  if (!panelRef || !toggleBtnRef) return;
+  panelRef.hidden = true;
+  toggleBtnRef.textContent = 'Legend ▲';
+}
+
 export function buildLegend(
   container: HTMLElement,
-  onToggle: (category: string, enabled: boolean) => void
+  onToggle: (category: string, enabled: boolean) => void,
+  onOpen?: () => void
 ): void {
   const toggleBtn = document.createElement('button');
   toggleBtn.id = 'legend-toggle';
-  toggleBtn.textContent = 'Legend';
+  toggleBtn.textContent = 'Legend ▲';
   toggleBtn.title = 'Toggle category legend';
 
   const panel = document.createElement('div');
@@ -81,8 +91,13 @@ export function buildLegend(
 
   toggleBtn.addEventListener('click', () => {
     panel.hidden = !panel.hidden;
+    toggleBtn.textContent = panel.hidden ? 'Legend ▲' : 'Legend ▼';
+    if (!panel.hidden) onOpen?.();
   });
 
   container.appendChild(toggleBtn);
   container.appendChild(panel);
+
+  panelRef = panel;
+  toggleBtnRef = toggleBtn;
 }

@@ -207,14 +207,20 @@ wikipediaRouter.get('/', async (req, res) => {
     // Continue — uncachedArticles may be partial but we can still fetch from Wikipedia
   }
 
-  // Batch-fetch uncached articles from Wikipedia (max 50 pageids per request)
-  let allBatchesSucceeded = true;
+  // Batch-fetch uncached articles from Wikipedia (max 20 pageids per request).
+  // Batches are independent requests, so run them concurrently rather than
+  // sequentially — with a full viewport (up to 100 geosearch results / 5
+  // batches), sequential fetching was adding several seconds of latency.
+  const batches: WikiArticle[][] = [];
   for (let i = 0; i < uncachedArticles.length; i += ARTICLE_BATCH_SIZE) {
-    const batch = uncachedArticles.slice(i, i + ARTICLE_BATCH_SIZE);
+    batches.push(uncachedArticles.slice(i, i + ARTICLE_BATCH_SIZE));
+  }
+
+  const batchResults = await Promise.all(batches.map(async (batch) => {
     const pageids = batch.map(a => a.pageId).join('|');
     try {
       const articleRes = await fetch(`${WIKI_ARTICLE_URL}&pageids=${pageids}`);
-      if (!articleRes.ok) { allBatchesSucceeded = false; continue; }
+      if (!articleRes.ok) return false;
       const data = await articleRes.json() as {
         query?: {
           pages?: Record<string, {
@@ -236,11 +242,14 @@ wikipediaRouter.get('/', async (req, res) => {
           newArticleData.set(article.pageId, { extract, category: article.category });
         }
       }
+      return true;
     } catch (err) {
       console.error('[wiki] Batch fetch error:', err);
-      allBatchesSucceeded = false;
+      return false;
     }
-  }
+  }));
+
+  const allBatchesSucceeded = batchResults.every(Boolean);
 
   // Only write geo cache when article data is complete — skip if any batch failed
   // (prevents caching incomplete data that would suppress extracts on future requests)
