@@ -1,5 +1,14 @@
-type GeocodeResult =
-  | { status: 'success'; latitude: number; longitude: number }
+import * as geocode from './geocode.js';
+
+export interface GeocodeChoice {
+  latitude: number;
+  longitude: number;
+  displayName: string;
+}
+
+export type GeocodeResult =
+  | { status: 'success'; latitude: number; longitude: number; displayName?: string }
+  | { status: 'multiple'; choices: GeocodeChoice[] }
   | { status: 'error'; message: string };
 
 const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
@@ -100,6 +109,18 @@ const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
 };
 
 export async function codeAddress(address: string): Promise<GeocodeResult> {
+  const nominatim = await geocode.searchAddress(address);
+  if (nominatim.status === 'ok' && nominatim.places && nominatim.places.length > 0) {
+    if (nominatim.places.length === 1) {
+      const place = nominatim.places[0];
+      return { status: 'success', latitude: place.latitude, longitude: place.longitude, displayName: place.displayName };
+    }
+    return { status: 'multiple', choices: nominatim.places };
+  }
+
+  // Nominatim found nothing, is rate-limited, or is unreachable — fall back
+  // to the curated offline table (guaranteed-landmark-rich anchor points for
+  // a handful of names), then to Google so the search box stays usable.
   const normalized = address.trim().toLowerCase();
   const hit = CITY_COORDS[normalized];
   if (hit) return { status: 'success', latitude: hit.lat, longitude: hit.lng };
@@ -118,6 +139,19 @@ export async function codeAddress(address: string): Promise<GeocodeResult> {
       }
     });
   });
+}
+
+export async function reverseAddress(lat: number, lng: number): Promise<GeocodeResult> {
+  const nominatim = await geocode.reverseGeocode(lat, lng);
+  if (nominatim.status === 'ok' && nominatim.place) {
+    return {
+      status: 'success',
+      latitude: nominatim.place.latitude,
+      longitude: nominatim.place.longitude,
+      displayName: nominatim.place.displayName,
+    };
+  }
+  return { status: 'error', message: nominatim.status };
 }
 
 export async function getCurrentPosition(): Promise<google.maps.LatLng> {
@@ -139,7 +173,14 @@ export async function getCurrentPosition(): Promise<google.maps.LatLng> {
       (error) => {
         console.error('Geolocation error:', error.message);
         resolve(new google.maps.LatLng(35.22, -80.84));
-      }
+      },
+      // Without an explicit timeout, the browser default is Infinity — an
+      // unanswered permission prompt (e.g. a missed OS-level location dialog)
+      // would hang the whole map init indefinitely instead of falling back.
+      // 15s (rather than something shorter) because desktop Wi-Fi/IP-based
+      // location fixes can genuinely take several seconds; maximumAge lets a
+      // recently-cached fix resolve instantly instead of re-acquiring.
+      { timeout: 15000, maximumAge: 60000 }
     );
   });
 }

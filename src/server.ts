@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { wikipediaRouter } from './routes/wikipedia.js';
 import { chatRouter } from './routes/chat.js';
+import { geocodeRouter } from './routes/geocode.js';
 import { getRedisClient } from './lib/redisClient.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -21,6 +22,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/api/wikipedia', wikipediaRouter);
 app.use('/api/chat', chatRouter);
+app.use('/api/geocode', geocodeRouter);
 
 // Eagerly initialize Redis so the connection can become ready before requests arrive.
 getRedisClient();
