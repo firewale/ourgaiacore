@@ -1,7 +1,10 @@
+import { MapLibreMap, type Marker, type IControl } from 'maplibre-gl';
 import * as wikipedia from './wikipedia.js';
 import * as marker from './marker.js';
 import * as search from './search.js';
 import * as geolocation from './geolocation.js';
+import type { Coordinate } from './coordinate.js';
+import { toLngLat } from './coordinate.js';
 import { showBanner, hideBanner } from './banner.js';
 import { buildLegend, collapseLegend } from './legend.js';
 import * as chat from './chat.js';
@@ -9,21 +12,6 @@ import * as mapContext from './mapContext.js';
 
 const POPUP_STYLES = `<style>
   @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&display=swap');
-  /* Strip Google Maps InfoWindow chrome */
-  .gm-style-iw-c {
-    padding: 0 !important;
-    border-radius: 3px !important;
-    background: #fefcf0 !important;
-    box-shadow: 2px 3px 10px rgba(0,0,0,0.18) !important;
-  }
-  .gm-style-iw-d {
-    overflow: hidden !important;
-    padding: 0 !important;
-  }
-  /* Hide native close button — replaced by og-popup__close */
-  .gm-style-iw-chr {
-    display: none !important;
-  }
   .og-popup {
     font-family: 'Caveat', cursive;
     font-size: 16px;
@@ -146,11 +134,11 @@ const POPUP_STYLES = `<style>
   }
 </style>`;
 
-function buildPopupContent(coord: wikipedia.WikiArticle): string {
-  const style = marker.CATEGORY_STYLE[coord.category] ?? marker.CATEGORY_STYLE.default;
-  const wikiUrl = `https://en.wikipedia.org/?curid=${coord.pageId}`;
-  const bodyHtml = coord.extract ?? '<p>No description available.</p>';
-  const bodyClass = coord.extract ? 'og-popup__body' : 'og-popup__body og-popup__body--empty';
+function buildPopupContent(article: wikipedia.WikiArticle): string {
+  const style = marker.CATEGORY_STYLE[article.category] ?? marker.CATEGORY_STYLE.default;
+  const wikiUrl = `https://en.wikipedia.org/?curid=${article.pageId}`;
+  const bodyHtml = article.extract ?? '<p>No description available.</p>';
+  const bodyClass = article.extract ? 'og-popup__body' : 'og-popup__body og-popup__body--empty';
 
   return `${POPUP_STYLES}
 <div class="og-popup" style="--cat-color:${style.color}">
@@ -162,53 +150,88 @@ function buildPopupContent(coord: wikipedia.WikiArticle): string {
     </div>
     <div class="og-popup__heading">
       <span class="og-popup__glyph">${style.glyph}</span>
-      <h3 class="og-popup__title">${coord.title}</h3>
+      <h3 class="og-popup__title">${article.title}</h3>
     </div>
     <div class="${bodyClass}">${bodyHtml}</div>
   </div>
 </div>`;
 }
 
+const DEFAULT_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+
 export let mapInitialized = false;
-let map: google.maps.Map;
+let map: MapLibreMap;
 let wikipediaLocal: typeof wikipedia;
 let markerLocal: typeof marker;
 let idleDebounce: ReturnType<typeof setTimeout> | undefined;
 
-const markerRegistry = new Map<number, { marker: google.maps.marker.AdvancedMarkerElement; category: wikipedia.ArticleCategory }>();
+const markerRegistry = new Map<number, { marker: Marker; category: wikipedia.ArticleCategory }>();
 const hiddenCategories = new Set<wikipedia.ArticleCategory>();
 
 function filterByCategories(hidden: Set<wikipedia.ArticleCategory>): void {
   markerRegistry.forEach(({ marker: m, category }) => {
-    m.map = hidden.has(category) ? null : map;
+    if (hidden.has(category)) {
+      m.remove();
+    } else {
+      m.addTo(map);
+    }
   });
 }
 
+class BottomLeftControl implements IControl {
+  private container: HTMLDivElement | undefined;
+
+  onAdd(): HTMLElement {
+    const bottomLeftDiv = document.createElement('div');
+    bottomLeftDiv.id = 'bottomLeftControls';
+    // MapLibre's corner containers have pointer-events:none by default and only
+    // re-enable clicks (pointer-events:auto) on elements carrying this class.
+    bottomLeftDiv.className = 'maplibregl-ctrl';
+
+    const chatDiv = document.createElement('div');
+    chatDiv.id = 'chatDiv';
+    chat.initialize(chatDiv, () => collapseLegend());
+    bottomLeftDiv.appendChild(chatDiv);
+
+    const legendDiv = document.createElement('div');
+    legendDiv.id = 'legendDiv';
+    buildLegend(legendDiv, (category, enabled) => {
+      const cat = category as wikipedia.ArticleCategory;
+      enabled ? hiddenCategories.delete(cat) : hiddenCategories.add(cat);
+      filterByCategories(hiddenCategories);
+    }, () => chat.collapseChat());
+    bottomLeftDiv.appendChild(legendDiv);
+
+    this.container = bottomLeftDiv;
+    return bottomLeftDiv;
+  }
+
+  onRemove(): void {
+    this.container?.remove();
+    this.container = undefined;
+  }
+}
+
 export function initialize(
-  latLng: google.maps.LatLng,
+  coord: Coordinate,
   markerMod: typeof marker,
   wikipediaMod: typeof wikipedia,
   searchMod: typeof search,
-  mapId: string = 'DEMO_MAP_ID'
+  styleUrl: string = DEFAULT_STYLE_URL
 ): void {
   wikipediaLocal = wikipediaMod;
   markerLocal = markerMod;
 
-  const mapOptions: google.maps.MapOptions = {
+  map = new MapLibreMap({
+    container: 'map',
+    style: styleUrl,
+    center: toLngLat(coord),
     zoom: 14,
-    center: latLng,
-    mapTypeId: google.maps.MapTypeId.TERRAIN,
-    mapId,
-  };
-
-  map = new google.maps.Map(
-    document.getElementById('map') as HTMLElement,
-    mapOptions
-  );
+  });
 
   mapInitialized = true;
 
-  setMapOrigin(latLng);
+  setMapOrigin(coord);
   setupClickEvents();
   setupCustomControls(searchMod);
 }
@@ -218,36 +241,36 @@ export function plotLandmarks(results: Record<number, wikipedia.WikiArticle>): v
 
   markerRegistry.forEach((entry, pageId) => {
     if (!(pageId in results)) {
-      entry.marker.map = null;
+      entry.marker.remove();
       markerRegistry.delete(pageId);
     }
   });
 
-  Object.values(results).forEach((coord) => {
-    if (markerRegistry.has(coord.pageId)) return;
+  Object.values(results).forEach((article) => {
+    if (markerRegistry.has(article.pageId)) return;
 
-    const latLng = new google.maps.LatLng(coord.lat, coord.long);
+    const coord: Coordinate = { lat: article.lat, lng: article.long };
     const m = markerLocal.placeMapMarker(
       map,
-      latLng,
-      coord.title,
-      buildPopupContent(coord),
-      markerLocal.getCategoryIcon(coord.category)
+      coord,
+      article.title,
+      buildPopupContent(article),
+      markerLocal.getCategoryIcon(article.category)
     );
-    markerRegistry.set(coord.pageId, { marker: m, category: coord.category });
+    markerRegistry.set(article.pageId, { marker: m, category: article.category });
 
-    if (hiddenCategories.has(coord.category)) {
-      m.map = null;
+    if (hiddenCategories.has(article.category)) {
+      m.remove();
     }
   });
 }
 
-export function setMapOrigin(latLng: google.maps.LatLng): void {
-  map.setCenter(latLng);
+export function setMapOrigin(coord: Coordinate): void {
+  map.setCenter(toLngLat(coord));
   const pin = markerLocal.getCircleIcon('blue');
   markerLocal.placeMapMarker(
     map,
-    latLng,
+    coord,
     'You are here!',
     `${POPUP_STYLES}
 <div class="og-popup" style="--cat-color:#1A73E8">
@@ -270,16 +293,16 @@ export function setMapOrigin(latLng: google.maps.LatLng): void {
 }
 
 // Called from search — pans the map and lets the idle event handle the Wikipedia fetch.
-export function setPosition(latLng: google.maps.LatLng): void {
-  if (!mapInitialized) initialize(latLng, markerLocal, wikipediaLocal, search);
+export function setPosition(coord: Coordinate): void {
+  if (!mapInitialized) initialize(coord, markerLocal, wikipediaLocal, search);
   map.setZoom(14);
-  setMapOrigin(latLng);
+  setMapOrigin(coord);
   chat.newChat();
 }
 
 function setupClickEvents(): void {
   // Debounce idle so rapid panning/zooming doesn't flood the Wikipedia API.
-  google.maps.event.addListener(map, 'idle', () => {
+  map.on('idle', () => {
     clearTimeout(idleDebounce);
     idleDebounce = setTimeout(() => void fetchWikipediaForCurrentView(), 800);
   });
@@ -287,9 +310,8 @@ function setupClickEvents(): void {
 
 async function fetchWikipediaForCurrentView(): Promise<void> {
   const center = map.getCenter();
-  if (!center) return;
-  const zoom = map.getZoom() ?? 14;
-  const status = await wikipediaLocal.getWikipediaData(center, zoom, plotLandmarks);
+  const coord: Coordinate = { lat: center.lat, lng: center.lng };
+  const status = await wikipediaLocal.getWikipediaData(coord, map.getZoom(), plotLandmarks);
   if (status === 'rate-limited') {
     showBanner('Wikipedia is rate limiting requests — please wait 5 minutes before exploring further.', 300000);
   } else {
@@ -298,34 +320,21 @@ async function fetchWikipediaForCurrentView(): Promise<void> {
 }
 
 function setupCustomControls(searchMod: typeof search): void {
-  const homeDiv = document.createElement('div') as HTMLDivElement;
+  const homeDiv = document.createElement('div');
   homeDiv.id = 'homeDiv';
+  homeDiv.className = 'map-search-overlay';
 
   searchMod.BuildSearchControl(homeDiv, geolocation, setPosition);
 
-  (homeDiv as HTMLDivElement & { index: number }).index = 1;
-  map.controls[google.maps.ControlPosition.TOP_CENTER].push(homeDiv);
+  map.getContainer().appendChild(homeDiv);
 
-  // Legend and chat share a single control slot so the browser's normal box layout
-  // stacks them, rather than relying on Maps to reposition sibling controls when one
-  // of them changes size (Maps computes each control's offset once and does not
-  // recompute it just because a child's `hidden` attribute toggles).
-  const bottomLeftDiv = document.createElement('div');
-  bottomLeftDiv.id = 'bottomLeftControls';
+  map.addControl(new BottomLeftControl(), 'bottom-left');
+}
 
-  const chatDiv = document.createElement('div');
-  chatDiv.id = 'chatDiv';
-  chat.initialize(chatDiv, () => collapseLegend());
-  bottomLeftDiv.appendChild(chatDiv);
-
-  const legendDiv = document.createElement('div');
-  legendDiv.id = 'legendDiv';
-  buildLegend(legendDiv, (category, enabled) => {
-    const cat = category as wikipedia.ArticleCategory;
-    enabled ? hiddenCategories.delete(cat) : hiddenCategories.add(cat);
-    filterByCategories(hiddenCategories);
-  }, () => chat.collapseChat());
-  bottomLeftDiv.appendChild(legendDiv);
-
-  map.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(bottomLeftDiv);
+export function _resetMapStateForTests(): void {
+  mapInitialized = false;
+  markerRegistry.clear();
+  hiddenCategories.clear();
+  clearTimeout(idleDebounce);
+  idleDebounce = undefined;
 }

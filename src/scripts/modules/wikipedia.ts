@@ -1,3 +1,5 @@
+import type { Coordinate } from './coordinate.js';
+
 const apiUrl = '/api/wikipedia';
 
 export type ArticleCategory =
@@ -17,8 +19,8 @@ export interface WikiArticle {
 // This prevents re-fetching when the map is panned only slightly or revisits an area.
 const cache = new Map<string, Record<number, WikiArticle>>();
 
-function cacheKey(latLng: google.maps.LatLng, zoom: number): string {
-  return `${latLng.lat().toFixed(2)},${latLng.lng().toFixed(2)},${zoom}`;
+function cacheKey(coord: Coordinate, zoom: number): string {
+  return `${coord.lat.toFixed(2)},${coord.lng.toFixed(2)},${zoom}`;
 }
 
 export function clearCache(): void {
@@ -28,20 +30,17 @@ export function clearCache(): void {
 export type WikiDataStatus = 'ok' | 'rate-limited' | 'error';
 
 export async function getWikipediaData(
-  latLng: google.maps.LatLng,
+  coord: Coordinate,
   zoom: number,
   callback: (results: Record<number, WikiArticle>) => void
 ): Promise<WikiDataStatus> {
-  const key = cacheKey(latLng, zoom);
+  const key = cacheKey(coord, zoom);
   if (cache.has(key)) {
     callback(cache.get(key)!);
     return 'ok';
   }
 
-  const lat = latLng.lat();
-  const lng = latLng.lng();
-
-  const params = new URLSearchParams({ lat: String(lat), lng: String(lng), zoom: String(zoom) });
+  const params = new URLSearchParams({ lat: String(coord.lat), lng: String(coord.lng), zoom: String(zoom) });
 
   let apiRes: Response;
   try {

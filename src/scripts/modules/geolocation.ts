@@ -1,4 +1,5 @@
 import * as geocode from './geocode.js';
+import type { Coordinate } from './coordinate.js';
 
 export interface GeocodeChoice {
   latitude: number;
@@ -120,25 +121,12 @@ export async function codeAddress(address: string): Promise<GeocodeResult> {
 
   // Nominatim found nothing, is rate-limited, or is unreachable — fall back
   // to the curated offline table (guaranteed-landmark-rich anchor points for
-  // a handful of names), then to Google so the search box stays usable.
+  // a handful of names).
   const normalized = address.trim().toLowerCase();
   const hit = CITY_COORDS[normalized];
   if (hit) return { status: 'success', latitude: hit.lat, longitude: hit.lng };
 
-  return new Promise((resolve) => {
-    const geocoder = new google.maps.Geocoder();
-    geocoder.geocode({ address }, (results, status) => {
-      if (status === google.maps.GeocoderStatus.OK && results?.[0]) {
-        resolve({
-          status: 'success',
-          latitude: results[0].geometry.location.lat(),
-          longitude: results[0].geometry.location.lng(),
-        });
-      } else {
-        resolve({ status: 'error', message: status });
-      }
-    });
-  });
+  return { status: 'error', message: nominatim.status };
 }
 
 export async function reverseAddress(lat: number, lng: number): Promise<GeocodeResult> {
@@ -154,25 +142,23 @@ export async function reverseAddress(lat: number, lng: number): Promise<GeocodeR
   return { status: 'error', message: nominatim.status };
 }
 
-export async function getCurrentPosition(): Promise<google.maps.LatLng> {
+export async function getCurrentPosition(): Promise<Coordinate> {
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
       console.error('Geolocation not available — using default location');
-      resolve(new google.maps.LatLng(35.22, -80.84));
+      resolve({ lat: 35.22, lng: -80.84 });
       return;
     }
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        resolve(
-          new google.maps.LatLng(
-            position.coords.latitude,
-            position.coords.longitude
-          )
-        );
+        resolve({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
       },
       (error) => {
         console.error('Geolocation error:', error.message);
-        resolve(new google.maps.LatLng(35.22, -80.84));
+        resolve({ lat: 35.22, lng: -80.84 });
       },
       // Without an explicit timeout, the browser default is Infinity — an
       // unanswered permission prompt (e.g. a missed OS-level location dialog)

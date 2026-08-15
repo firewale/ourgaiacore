@@ -1,113 +1,155 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getCircleIcon, placeMapMarker, _resetSharedInfoWindow } from '../marker.js';
+import type { MapLibreMap } from 'maplibre-gl';
+import type { Coordinate } from '../coordinate.js';
+import { getCircleIcon, getCategoryIcon, placeMapMarker, _resetSharedPopup } from '../marker.js';
 
-const mockOpen = vi.fn();
-const mockSetContent = vi.fn();
-const mockClose = vi.fn();
-const mockAddEventListener = vi.fn();
-const mockMapsEventAddListener = vi.fn();
-const mockPinElement = vi.fn((opts: { background?: string }) => ({
-  element: document.createElement('div'),
-  background: opts?.background,
+const {
+  mockPopupElement,
+  mockSetHTML,
+  mockPopupSetLngLat,
+  mockPopupAddTo,
+  mockPopupGetElement,
+  mockPopupRemove,
+  mockPopupConstructor,
+  mockMarkerSetLngLat,
+  mockMarkerAddTo,
+  mockMarkerGetElement,
+  mockMarkerConstructor,
+  getMarkerElement,
+  resetMarkerElement,
+} = vi.hoisted(() => {
+  const popupElement = document.createElement('div');
+  const setHTML = vi.fn().mockReturnThis();
+  const popupSetLngLat = vi.fn().mockReturnThis();
+  const popupAddTo = vi.fn().mockReturnThis();
+  const popupGetElement = vi.fn(() => popupElement);
+  const popupRemove = vi.fn();
+  const popupConstructor = vi.fn(() => ({
+    setLngLat: popupSetLngLat,
+    setHTML,
+    addTo: popupAddTo,
+    getElement: popupGetElement,
+    remove: popupRemove,
+  }));
+
+  let markerElement = document.createElement('div');
+  const markerSetLngLat = vi.fn().mockReturnThis();
+  const markerAddTo = vi.fn().mockReturnThis();
+  const markerGetElement = vi.fn(() => markerElement);
+  const markerConstructor = vi.fn(() => ({
+    setLngLat: markerSetLngLat,
+    addTo: markerAddTo,
+    getElement: markerGetElement,
+  }));
+
+  return {
+    mockPopupElement: popupElement,
+    mockSetHTML: setHTML,
+    mockPopupSetLngLat: popupSetLngLat,
+    mockPopupAddTo: popupAddTo,
+    mockPopupGetElement: popupGetElement,
+    mockPopupRemove: popupRemove,
+    mockPopupConstructor: popupConstructor,
+    mockMarkerSetLngLat: markerSetLngLat,
+    mockMarkerAddTo: markerAddTo,
+    mockMarkerGetElement: markerGetElement,
+    mockMarkerConstructor: markerConstructor,
+    getMarkerElement: () => markerElement,
+    resetMarkerElement: () => { markerElement = document.createElement('div'); },
+  };
+});
+
+vi.mock('maplibre-gl', () => ({
+  Marker: mockMarkerConstructor,
+  Popup: mockPopupConstructor,
 }));
-const mockMarkerConstructor = vi.fn(() => ({ addEventListener: mockAddEventListener }));
-const mockInfoWindowConstructor = vi.fn(() => ({ open: mockOpen, setContent: mockSetContent, close: mockClose }));
 
 beforeEach(() => {
-  _resetSharedInfoWindow();
-  vi.stubGlobal('google', {
-    maps: {
-      marker: {
-        PinElement: mockPinElement,
-        AdvancedMarkerElement: mockMarkerConstructor,
-      },
-      InfoWindow: mockInfoWindowConstructor,
-      event: { addListener: mockMapsEventAddListener },
-    },
-  });
+  _resetSharedPopup();
+  mockPopupElement.innerHTML = '';
+  resetMarkerElement();
   vi.clearAllMocks();
 });
 
 describe('getCircleIcon', () => {
-  it('creates a PinElement with the specified background color', () => {
-    getCircleIcon('red');
-    expect(mockPinElement).toHaveBeenCalledWith(
-      expect.objectContaining({ background: 'red' })
-    );
+  it('creates a pin element with the specified background color', () => {
+    const el = getCircleIcon('red');
+    expect(el.innerHTML).toContain('fill="red"');
   });
 
   it('defaults to red when no color is provided', () => {
-    getCircleIcon();
-    expect(mockPinElement).toHaveBeenCalledWith(
-      expect.objectContaining({ background: 'red' })
-    );
+    const el = getCircleIcon();
+    expect(el.innerHTML).toContain('fill="red"');
+  });
+});
+
+describe('getCategoryIcon', () => {
+  it('renders the glyph for the given category', () => {
+    const el = getCategoryIcon('museum');
+    expect(el.innerHTML).toContain('🏛');
   });
 
-  it('uses white border and glyph colors', () => {
-    getCircleIcon('blue');
-    expect(mockPinElement).toHaveBeenCalledWith(
-      expect.objectContaining({ borderColor: 'white', glyphColor: 'white' })
-    );
+  it('falls back to the default category style for an unknown category', () => {
+    const el = getCategoryIcon(undefined);
+    expect(el.innerHTML).toContain('?');
   });
 });
 
 describe('placeMapMarker', () => {
-  const mockMap = {} as google.maps.Map;
-  const mockLatLng = {} as google.maps.LatLng;
+  const mockMap = {} as MapLibreMap;
+  const coord: Coordinate = { lat: 12, lng: 34 };
 
-  it('creates an AdvancedMarkerElement with the correct position and title', () => {
-    placeMapMarker(mockMap, mockLatLng, 'Test Marker');
-    expect(mockMarkerConstructor).toHaveBeenCalledWith(
-      expect.objectContaining({ position: mockLatLng, map: mockMap, title: 'Test Marker' })
-    );
+  it('creates a Marker anchored to the bottom and sets its position', () => {
+    placeMapMarker(mockMap, coord, 'Test Marker');
+    expect(mockMarkerConstructor).toHaveBeenCalledWith(expect.objectContaining({ anchor: 'bottom' }));
+    expect(mockMarkerSetLngLat).toHaveBeenCalledWith([34, 12]);
+    expect(mockMarkerAddTo).toHaveBeenCalledWith(mockMap);
   });
 
-  it('does not create an InfoWindow when popupContent is undefined', () => {
-    placeMapMarker(mockMap, mockLatLng, 'No Popup');
-    expect(mockInfoWindowConstructor).not.toHaveBeenCalled();
+  it('sets the marker title', () => {
+    placeMapMarker(mockMap, coord, 'Test Marker');
+    expect(getMarkerElement().title).toBe('Test Marker');
   });
 
-  it('sets gmpClickable to true when popupContent is provided', () => {
-    placeMapMarker(mockMap, mockLatLng, 'Clickable', 'Some content');
-    expect(mockMarkerConstructor).toHaveBeenCalledWith(
-      expect.objectContaining({ gmpClickable: true })
-    );
+  it('does not create a Popup when popupContent is undefined', () => {
+    placeMapMarker(mockMap, coord, 'No Popup');
+    expect(mockPopupConstructor).not.toHaveBeenCalled();
   });
 
-  it('sets gmpClickable to false when popupContent is undefined', () => {
-    placeMapMarker(mockMap, mockLatLng, 'Not Clickable');
-    expect(mockMarkerConstructor).toHaveBeenCalledWith(
-      expect.objectContaining({ gmpClickable: false })
-    );
+  it('attaches a click listener when popupContent is provided', () => {
+    const addEventListenerSpy = vi.spyOn(getMarkerElement(), 'addEventListener');
+    placeMapMarker(mockMap, coord, 'With Popup', 'Some content');
+    expect(addEventListenerSpy).toHaveBeenCalledWith('click', expect.any(Function));
+    addEventListenerSpy.mockRestore();
   });
 
-  it('creates a shared InfoWindow and attaches a click listener when popupContent is provided', () => {
-    placeMapMarker(mockMap, mockLatLng, 'With Popup', 'Some content');
-    expect(mockAddEventListener).toHaveBeenCalledWith('gmp-click', expect.any(Function));
+  it('opens the shared popup on marker click', () => {
+    placeMapMarker(mockMap, coord, 'With Popup', 'Some content');
+    getMarkerElement().dispatchEvent(new MouseEvent('click'));
+    expect(mockSetHTML).toHaveBeenCalledWith('Some content');
+    expect(mockPopupAddTo).toHaveBeenCalledWith(mockMap);
   });
 
-  it('reuses the shared InfoWindow across multiple markers', () => {
-    placeMapMarker(mockMap, mockLatLng, 'Marker A', 'Content A', undefined, true);
-    placeMapMarker(mockMap, mockLatLng, 'Marker B', 'Content B', undefined, true);
-    expect(mockInfoWindowConstructor).toHaveBeenCalledTimes(1);
+  it('reuses the shared Popup across multiple markers', () => {
+    placeMapMarker(mockMap, coord, 'Marker A', 'Content A', undefined, true);
+    placeMapMarker(mockMap, coord, 'Marker B', 'Content B', undefined, true);
+    expect(mockPopupConstructor).toHaveBeenCalledTimes(1);
   });
 
-  it('opens the InfoWindow immediately when startopen is true', () => {
-    placeMapMarker(mockMap, mockLatLng, 'Open Now', 'Content', undefined, true);
-    expect(mockSetContent).toHaveBeenCalledWith('Content');
-    expect(mockOpen).toHaveBeenCalled();
+  it('opens the popup immediately when startopen is true', () => {
+    placeMapMarker(mockMap, coord, 'Open Now', 'Content', undefined, true);
+    expect(mockSetHTML).toHaveBeenCalledWith('Content');
+    expect(mockPopupAddTo).toHaveBeenCalled();
   });
 
-  it('does not open the InfoWindow when startopen is false', () => {
-    placeMapMarker(mockMap, mockLatLng, 'Stay Closed', 'Content', undefined, false);
-    expect(mockOpen).not.toHaveBeenCalled();
+  it('does not open the popup when startopen is false', () => {
+    placeMapMarker(mockMap, coord, 'Stay Closed', 'Content', undefined, false);
+    expect(mockPopupAddTo).not.toHaveBeenCalled();
   });
 
-  it('passes the PinElement directly as marker content', () => {
+  it('passes the pin element directly as marker content', () => {
     const pin = getCircleIcon('green');
-    placeMapMarker(mockMap, mockLatLng, 'Pinned', undefined, pin);
-    expect(mockMarkerConstructor).toHaveBeenCalledWith(
-      expect.objectContaining({ content: pin })
-    );
+    placeMapMarker(mockMap, coord, 'Pinned', undefined, pin);
+    expect(mockMarkerConstructor).toHaveBeenCalledWith(expect.objectContaining({ element: pin }));
   });
 });

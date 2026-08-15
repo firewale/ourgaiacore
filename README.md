@@ -1,11 +1,10 @@
 # OurGaia
 
-A single-page web application that shows a Google Maps view centered on your location and plots nearby Wikipedia articles as interactive markers.
+A single-page web application that shows a MapLibre-powered map centered on your location and plots nearby Wikipedia articles as interactive markers.
 
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) v20 or later
-- A Google Maps JavaScript API key ([get one here](https://developers.google.com/maps/documentation/javascript/get-api-key))
 
 ## Setup
 
@@ -23,10 +22,10 @@ A single-page web application that shows a Google Maps view centered on your loc
    cp .env.example .env
    ```
 
-   Open `.env` and set your Google Maps API key:
+   No API key is required — the map defaults to [OpenFreeMap](https://openfreemap.org/)'s free `liberty` style. Optionally set a different MapLibre style URL in `.env`:
 
    ```
-   VITE_GOOGLE_MAPS_API_KEY=your_key_here
+   VITE_MAP_STYLE_URL=https://tiles.openfreemap.org/styles/liberty
    PORT=8080
    HTTPS_PORT=8443
    ```
@@ -87,10 +86,10 @@ npm run test:coverage  # generate a coverage report
 
 ## Docker
 
-Build the image (the API key is embedded into the frontend bundle at build time):
+Build the image:
 
 ```bash
-docker build -t ourgaia --build-arg VITE_GOOGLE_MAPS_API_KEY=your_key_here .
+docker build -t ourgaia .
 ```
 
 Run the container:

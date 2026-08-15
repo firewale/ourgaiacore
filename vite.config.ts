@@ -2,6 +2,9 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   publicDir: 'public',
+  optimizeDeps: {
+    exclude: ['maplibre-gl'],
+  },
   build: {
     outDir: 'dist/client',
     emptyOutDir: true,
