@@ -132,4 +132,84 @@ describe('search (via button click)', () => {
     );
     expect(document.getElementById('error-banner')!.textContent).toContain('xyznonexistent');
   });
+
+  it('renders a picklist of choices when codeAddress returns status multiple', async () => {
+    vi.spyOn(geolocation, 'codeAddress').mockResolvedValue({
+      status: 'multiple',
+      choices: [
+        { latitude: 39.8, longitude: -89.6, displayName: 'Springfield, Illinois, USA' },
+        { latitude: 42.1, longitude: -72.6, displayName: 'Springfield, Massachusetts, USA' },
+      ],
+    });
+    const { controlDiv } = setupControl();
+
+    (document.getElementById('searchTerm') as HTMLInputElement).value = 'Springfield';
+    document.getElementById('searchButton')!.click();
+
+    const resultsList = await vi.waitFor(() => {
+      const el = controlDiv.querySelector('#search-results') as HTMLElement;
+      expect(el.hidden).toBe(false);
+      return el;
+    });
+
+    const items = resultsList.querySelectorAll('.search-result-item');
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toBe('Springfield, Illinois, USA');
+    expect(items[1].textContent).toBe('Springfield, Massachusetts, USA');
+    expect(document.getElementById('error-banner')!.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('resolves the chosen picklist entry and hides the list on click', async () => {
+    vi.spyOn(geolocation, 'codeAddress').mockResolvedValue({
+      status: 'multiple',
+      choices: [
+        { latitude: 39.8, longitude: -89.6, displayName: 'Springfield, Illinois, USA' },
+        { latitude: 42.1, longitude: -72.6, displayName: 'Springfield, Massachusetts, USA' },
+      ],
+    });
+    const { controlDiv, setLocationCallback } = setupControl();
+
+    (document.getElementById('searchTerm') as HTMLInputElement).value = 'Springfield';
+    document.getElementById('searchButton')!.click();
+
+    const resultsList = await vi.waitFor(() => {
+      const el = controlDiv.querySelector('#search-results') as HTMLElement;
+      expect(el.hidden).toBe(false);
+      return el;
+    });
+
+    const secondItem = resultsList.querySelectorAll('.search-result-item')[1] as HTMLButtonElement;
+    secondItem.click();
+
+    expect(setLocationCallback).toHaveBeenCalledOnce();
+    const arg = setLocationCallback.mock.calls[0][0] as MockLatLng;
+    expect(arg.lat).toBe(42.1);
+    expect(arg.lng).toBe(-72.6);
+    expect(resultsList.hidden).toBe(true);
+  });
+
+  it('clears a previous picklist when a new search is issued', async () => {
+    const codeAddressSpy = vi.spyOn(geolocation, 'codeAddress');
+    codeAddressSpy.mockResolvedValueOnce({
+      status: 'multiple',
+      choices: [{ latitude: 1, longitude: 1, displayName: 'First Match' }],
+    });
+    const { controlDiv } = setupControl();
+
+    (document.getElementById('searchTerm') as HTMLInputElement).value = 'Ambiguous';
+    document.getElementById('searchButton')!.click();
+
+    const resultsList = await vi.waitFor(() => {
+      const el = controlDiv.querySelector('#search-results') as HTMLElement;
+      expect(el.hidden).toBe(false);
+      return el;
+    });
+
+    codeAddressSpy.mockResolvedValueOnce({ status: 'error', message: 'ZERO_RESULTS' });
+    (document.getElementById('searchTerm') as HTMLInputElement).value = 'xyznonexistent';
+    document.getElementById('searchButton')!.click();
+
+    await vi.waitFor(() => expect(resultsList.hidden).toBe(true));
+    expect(resultsList.querySelectorAll('.search-result-item')).toHaveLength(0);
+  });
 });
