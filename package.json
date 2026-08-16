@@ -9,6 +9,8 @@
         "start": "node dist/server.js",
         "predev": "node scripts/copy-maplibre-worker.mjs",
         "dev": "concurrently \"tsx src/server.ts\" \"vite\"",
+        "services:up": "docker compose up -d",
+        "services:down": "docker compose down",
         "prebuild": "node scripts/copy-maplibre-worker.mjs",
         "build": "tsc -p tsconfig.server.json && vite build",
         "test": "vitest run",

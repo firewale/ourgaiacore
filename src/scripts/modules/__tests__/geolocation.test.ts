@@ -3,9 +3,14 @@ import { getCurrentPosition, codeAddress } from '../geolocation.js';
 import * as geocode from '../geocode.js';
 
 beforeEach(() => {
+  document.body.innerHTML = '<div id="error-banner" hidden></div>';
   vi.clearAllMocks();
   vi.spyOn(geocode, 'searchAddress').mockResolvedValue({ status: 'error' });
 });
+
+function getBanner(): HTMLElement {
+  return document.getElementById('error-banner') as HTMLElement;
+}
 
 describe('getCurrentPosition', () => {
   it('resolves with a coordinate when geolocation succeeds', async () => {
@@ -20,6 +25,7 @@ describe('getCurrentPosition', () => {
 
     const result = await getCurrentPosition();
     expect(result).toEqual({ lat: 40.71, lng: -74.0 });
+    expect(getBanner().hasAttribute('hidden')).toBe(true);
   });
 
   it('passes a finite timeout so an unanswered permission prompt cannot hang forever', async () => {
@@ -51,6 +57,8 @@ describe('getCurrentPosition', () => {
 
     const result = await getCurrentPosition();
     expect(result).toEqual({ lat: 35.22, lng: -80.84 });
+    expect(getBanner().hasAttribute('hidden')).toBe(false);
+    expect(getBanner().textContent).toContain('Location Services');
   });
 
   it('falls back to Charlotte when navigator.geolocation is unavailable', async () => {
@@ -61,6 +69,8 @@ describe('getCurrentPosition', () => {
 
     const result = await getCurrentPosition();
     expect(result).toEqual({ lat: 35.22, lng: -80.84 });
+    expect(getBanner().hasAttribute('hidden')).toBe(false);
+    expect(getBanner().textContent).toContain('Location Services');
   });
 });
 

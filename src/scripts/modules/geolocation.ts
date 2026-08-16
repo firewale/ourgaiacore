@@ -1,5 +1,11 @@
 import * as geocode from './geocode.js';
 import type { Coordinate } from './coordinate.js';
+import { showBanner } from './banner.js';
+
+const LOCATION_UNAVAILABLE_MESSAGE =
+  "Couldn't determine your location — showing a default area instead. Enable Location Services for this browser if you'd like the map centered on you automatically.";
+
+export const DEFAULT_COORDINATE: Coordinate = { lat: 35.22, lng: -80.84 };
 
 export interface GeocodeChoice {
   latitude: number;
@@ -146,7 +152,8 @@ export async function getCurrentPosition(): Promise<Coordinate> {
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
       console.error('Geolocation not available — using default location');
-      resolve({ lat: 35.22, lng: -80.84 });
+      showBanner(LOCATION_UNAVAILABLE_MESSAGE, 8000);
+      resolve(DEFAULT_COORDINATE);
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -158,14 +165,17 @@ export async function getCurrentPosition(): Promise<Coordinate> {
       },
       (error) => {
         console.error('Geolocation error:', error.message);
-        resolve({ lat: 35.22, lng: -80.84 });
+        showBanner(LOCATION_UNAVAILABLE_MESSAGE, 8000);
+        resolve(DEFAULT_COORDINATE);
       },
-      // Without an explicit timeout, the browser default is Infinity — an
-      // unanswered permission prompt (e.g. a missed OS-level location dialog)
-      // would hang the whole map init indefinitely instead of falling back.
-      // 15s (rather than something shorter) because desktop Wi-Fi/IP-based
-      // location fixes can genuinely take several seconds; maximumAge lets a
-      // recently-cached fix resolve instantly instead of re-acquiring.
+      // Without an explicit timeout, the browser default is Infinity. 15s
+      // gives desktop Wi-Fi/IP-based location fixes a fair chance to resolve
+      // without leaving the fallback banner (see LOCATION_UNAVAILABLE_MESSAGE)
+      // waiting too long to appear when a lookup was never going to succeed —
+      // we confirmed experimentally that a much longer timeout doesn't
+      // meaningfully improve success odds, just delays the fallback.
+      // maximumAge lets a recently-cached fix resolve instantly instead of
+      // re-acquiring.
       { timeout: 15000, maximumAge: 60000 }
     );
   });

@@ -157,6 +157,22 @@ function buildPopupContent(article: wikipedia.WikiArticle): string {
 </div>`;
 }
 
+const WELCOME_POPUP_HTML = `${POPUP_STYLES}
+<div class="og-popup" style="--cat-color:#1A73E8">
+
+  <div class="og-popup__page">
+    <div class="og-popup__toprow">
+      <span></span>
+      <button class="og-popup__close">✕</button>
+    </div>
+    <h3 class="og-popup__title">📍 Welcome to OurGaia!</h3>
+    <div class="og-popup__body">
+      <p>OurGaia places Wikipedia landmarks on the map around you — museums, parks, historic sites, transit stops, and more, each with its own colour and icon.</p>
+      <p>Pan or zoom to explore a new area, use the search bar to jump to any city or address, or click any marker to read about it.</p>
+    </div>
+  </div>
+</div>`;
+
 const DEFAULT_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
 export let mapInitialized = false;
@@ -164,6 +180,9 @@ let map: MapLibreMap;
 let wikipediaLocal: typeof wikipedia;
 let markerLocal: typeof marker;
 let idleDebounce: ReturnType<typeof setTimeout> | undefined;
+let wikipediaRateLimited = false;
+let originMarker: Marker | undefined;
+let userInteracted = false;
 
 const markerRegistry = new Map<number, { marker: Marker; category: wikipedia.ArticleCategory }>();
 const hiddenCategories = new Set<wikipedia.ArticleCategory>();
@@ -234,6 +253,15 @@ export function initialize(
   setMapOrigin(coord);
   setupClickEvents();
   setupCustomControls(searchMod);
+  setupInteractionTracking();
+}
+
+function setupInteractionTracking(): void {
+  // `originalEvent` is only set for user-driven camera changes (mouse/touch/wheel),
+  // not for our own programmatic setCenter() calls — this is how we tell the two apart.
+  map.on('movestart', (e) => {
+    if (e.originalEvent) userInteracted = true;
+  });
 }
 
 export function plotLandmarks(results: Record<number, wikipedia.WikiArticle>): void {
@@ -265,36 +293,30 @@ export function plotLandmarks(results: Record<number, wikipedia.WikiArticle>): v
   });
 }
 
+function placeOriginMarker(coord: Coordinate, startopen: boolean): void {
+  originMarker?.remove();
+  const pin = markerLocal.getCircleIcon('blue');
+  originMarker = markerLocal.placeMapMarker(map, coord, 'You are here!', WELCOME_POPUP_HTML, pin, startopen);
+}
+
 export function setMapOrigin(coord: Coordinate): void {
   map.setCenter(toLngLat(coord));
-  const pin = markerLocal.getCircleIcon('blue');
-  markerLocal.placeMapMarker(
-    map,
-    coord,
-    'You are here!',
-    `${POPUP_STYLES}
-<div class="og-popup" style="--cat-color:#1A73E8">
+  placeOriginMarker(coord, true);
+}
 
-  <div class="og-popup__page">
-    <div class="og-popup__toprow">
-      <span></span>
-      <button class="og-popup__close">✕</button>
-    </div>
-    <h3 class="og-popup__title">📍 Welcome to OurGaia!</h3>
-    <div class="og-popup__body">
-      <p>OurGaia places Wikipedia landmarks on the map around you — museums, parks, historic sites, transit stops, and more, each with its own colour and icon.</p>
-      <p>Pan or zoom to explore a new area, use the search bar to jump to any city or address, or click any marker to read about it.</p>
-    </div>
-  </div>
-</div>`,
-    pin,
-    true
-  );
+// Called once geolocation resolves, to silently correct the map's initial
+// placeholder position — skipped if the user has already started interacting
+// with the map by then, so we never yank the view out from under them.
+export function recenterToUserLocation(coord: Coordinate): void {
+  if (userInteracted) return;
+  map.setCenter(toLngLat(coord));
+  placeOriginMarker(coord, false);
 }
 
 // Called from search — pans the map and lets the idle event handle the Wikipedia fetch.
 export function setPosition(coord: Coordinate): void {
   if (!mapInitialized) initialize(coord, markerLocal, wikipediaLocal, search);
+  userInteracted = true;
   map.setZoom(14);
   setMapOrigin(coord);
   chat.newChat();
@@ -313,8 +335,12 @@ async function fetchWikipediaForCurrentView(): Promise<void> {
   const coord: Coordinate = { lat: center.lat, lng: center.lng };
   const status = await wikipediaLocal.getWikipediaData(coord, map.getZoom(), plotLandmarks);
   if (status === 'rate-limited') {
+    wikipediaRateLimited = true;
     showBanner('Wikipedia is rate limiting requests — please wait 5 minutes before exploring further.', 300000);
-  } else {
+  } else if (wikipediaRateLimited) {
+    // Only clear the banner if it's the one we showed — an unrelated banner
+    // (e.g. a geolocation notice) may be up and shouldn't be dismissed by this.
+    wikipediaRateLimited = false;
     hideBanner();
   }
 }
@@ -335,6 +361,9 @@ export function _resetMapStateForTests(): void {
   mapInitialized = false;
   markerRegistry.clear();
   hiddenCategories.clear();
+  wikipediaRateLimited = false;
+  originMarker = undefined;
+  userInteracted = false;
   clearTimeout(idleDebounce);
   idleDebounce = undefined;
 }

@@ -15,8 +15,12 @@ import * as map from './modules/map.js';
 setWorkerUrl('/maplibre/maplibre-gl-worker.mjs');
 
 async function initMap(): Promise<void> {
+  // Render immediately at a default location rather than blocking on
+  // geolocation — which can take several seconds or the full 15s timeout —
+  // then silently recenter once (if) the real location resolves.
+  map.initialize(geolocation.DEFAULT_COORDINATE, marker, wikipedia, search, import.meta.env.VITE_MAP_STYLE_URL);
   const coord = await geolocation.getCurrentPosition();
-  map.initialize(coord, marker, wikipedia, search, import.meta.env.VITE_MAP_STYLE_URL);
+  map.recenterToUserLocation(coord);
 }
 
 void initMap();

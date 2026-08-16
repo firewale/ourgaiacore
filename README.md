@@ -35,7 +35,13 @@ A single-page web application that shows a MapLibre-powered map centered on your
 **Start Redis** (optional but recommended for caching):
 
 ```bash
-docker run -p 6379:6379 redis
+npm run services:up
+```
+
+This runs `docker compose up -d`, starting a local Redis container (`compose.yaml`) published on `6379` to match `REDIS_URL` in `.env.example`. Stop it with:
+
+```bash
+npm run services:down
 ```
 
 > If Redis is unavailable the server falls back to direct Wikipedia API calls with no caching.

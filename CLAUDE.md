@@ -7,6 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm install            # install dependencies
 npm run dev            # start dev servers (Vite at :5173 for frontend, Express at :8080)
+npm run services:up    # start Redis for local caching (docker compose up -d)
+npm run services:down  # stop Redis (docker compose down)
 npm run build          # compile TypeScript server + bundle frontend with Vite
 npm start              # run production build (requires npm run build first)
 npm test               # run Vitest unit tests
