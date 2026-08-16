@@ -13,6 +13,8 @@ const { FakeMap, getLastInstance, resetInstances } = vi.hoisted(() => {
     public center: [number, number];
     public zoomLevel: number;
     public lastControlElement: HTMLElement | undefined;
+    public hiddenLayers: string[] = [];
+    public existingLayers = new Set(['poi_r1', 'poi_r7', 'poi_r20', 'poi_transit']);
     private listeners: Record<string, Array<(e?: { originalEvent?: unknown }) => void>> = {};
     private container = document.createElement('div');
 
@@ -41,6 +43,16 @@ const { FakeMap, getLastInstance, resetInstances } = vi.hoisted(() => {
       return this.zoomLevel;
     }
 
+    getBounds(): { getNorth(): number; getSouth(): number; getEast(): number; getWest(): number } {
+      const [lng, lat] = this.center;
+      return {
+        getNorth: () => lat + 0.01,
+        getSouth: () => lat - 0.01,
+        getEast: () => lng + 0.01,
+        getWest: () => lng - 0.01,
+      };
+    }
+
     setCenter(c: [number, number]): void {
       this.center = c;
     }
@@ -53,12 +65,24 @@ const { FakeMap, getLastInstance, resetInstances } = vi.hoisted(() => {
       return this.container;
     }
 
+    getLayer(id: string): object | undefined {
+      return this.existingLayers.has(id) ? {} : undefined;
+    }
+
+    setLayoutProperty(layerId: string, prop: string, value: unknown): void {
+      if (prop === 'visibility' && value === 'none') this.hiddenLayers.push(layerId);
+    }
+
     fireIdle(): void {
       this.listeners['idle']?.forEach((cb) => cb());
     }
 
     fireMovestart(originalEvent?: unknown): void {
       this.listeners['movestart']?.forEach((cb) => cb({ originalEvent }));
+    }
+
+    fireLoad(): void {
+      this.listeners['load']?.forEach((cb) => cb());
     }
   }
 
@@ -115,6 +139,24 @@ describe('initialize', () => {
     const instance = getLastInstance();
     expect(instance.options.style).toBe('https://example.com/style.json');
   });
+
+  it('hides the basemap POI layers (businesses, transit, etc.) once the style loads', () => {
+    map.initialize({ lat: 0, lng: 0 }, fakeMarkerMod, fakeWikipediaMod, fakeSearchMod);
+    const instance = getLastInstance();
+
+    instance.fireLoad();
+
+    expect(instance.hiddenLayers.sort()).toEqual(['poi_r1', 'poi_r20', 'poi_r7', 'poi_transit']);
+  });
+
+  it('does not throw when the style lacks the expected POI layer ids', () => {
+    map.initialize({ lat: 0, lng: 0 }, fakeMarkerMod, fakeWikipediaMod, fakeSearchMod);
+    const instance = getLastInstance();
+    instance.existingLayers.clear();
+
+    expect(() => instance.fireLoad()).not.toThrow();
+    expect(instance.hiddenLayers).toEqual([]);
+  });
 });
 
 describe('idle-debounced Wikipedia refetch', () => {
@@ -131,6 +173,13 @@ describe('idle-debounced Wikipedia refetch', () => {
       await vi.advanceTimersByTimeAsync(800);
 
       expect(fakeWikipediaMod.getWikipediaData).toHaveBeenCalledTimes(1);
+      const bounds = (fakeWikipediaMod.getWikipediaData as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(bounds).toMatchObject({
+        north: expect.any(Number),
+        south: expect.any(Number),
+        east: expect.any(Number),
+        west: expect.any(Number),
+      });
     } finally {
       vi.useRealTimers();
     }

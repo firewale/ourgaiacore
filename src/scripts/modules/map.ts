@@ -3,7 +3,7 @@ import * as wikipedia from './wikipedia.js';
 import * as marker from './marker.js';
 import * as search from './search.js';
 import * as geolocation from './geolocation.js';
-import type { Coordinate } from './coordinate.js';
+import type { Coordinate, Bounds } from './coordinate.js';
 import { toLngLat } from './coordinate.js';
 import { showBanner, hideBanner } from './banner.js';
 import { buildLegend, collapseLegend } from './legend.js';
@@ -175,6 +175,20 @@ const WELCOME_POPUP_HTML = `${POPUP_STYLES}
 
 const DEFAULT_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
+// OpenFreeMap's "liberty" style lumps businesses/shops/parking icons into these
+// ranked POI layers, plus a separate layer for bus/rail/airport icons — we hide
+// all of them so the map only shows Wikipedia landmarks, not basemap clutter.
+// Guarded with getLayer() since a custom VITE_MAP_STYLE_URL may not have these ids.
+const HIDDEN_BASEMAP_POI_LAYERS = ['poi_r1', 'poi_r7', 'poi_r20', 'poi_transit'];
+
+function hideBasemapPoiLayers(): void {
+  for (const layerId of HIDDEN_BASEMAP_POI_LAYERS) {
+    if (map.getLayer(layerId)) {
+      map.setLayoutProperty(layerId, 'visibility', 'none');
+    }
+  }
+}
+
 export let mapInitialized = false;
 let map: MapLibreMap;
 let wikipediaLocal: typeof wikipedia;
@@ -250,6 +264,7 @@ export function initialize(
 
   mapInitialized = true;
 
+  map.on('load', hideBasemapPoiLayers);
   setMapOrigin(coord);
   setupClickEvents();
   setupCustomControls(searchMod);
@@ -264,6 +279,10 @@ function setupInteractionTracking(): void {
   });
 }
 
+// `results` represents the padded-viewport superset returned by the latest fetch
+// (see wikipedia.ts's bounds padding), not a literal viewport-only set — a marker
+// can briefly persist just past the visible edge until the pan clears the padded
+// box too. That's intentional (it's what avoids re-fetching on small pans).
 export function plotLandmarks(results: Record<number, wikipedia.WikiArticle>): void {
   mapContext.setVisibleArticles(Object.values(results));
 
@@ -331,9 +350,14 @@ function setupClickEvents(): void {
 }
 
 async function fetchWikipediaForCurrentView(): Promise<void> {
-  const center = map.getCenter();
-  const coord: Coordinate = { lat: center.lat, lng: center.lng };
-  const status = await wikipediaLocal.getWikipediaData(coord, map.getZoom(), plotLandmarks);
+  const mapBounds = map.getBounds();
+  const bounds: Bounds = {
+    north: mapBounds.getNorth(),
+    south: mapBounds.getSouth(),
+    east: mapBounds.getEast(),
+    west: mapBounds.getWest(),
+  };
+  const status = await wikipediaLocal.getWikipediaData(bounds, plotLandmarks);
   if (status === 'rate-limited') {
     wikipediaRateLimited = true;
     showBanner('Wikipedia is rate limiting requests — please wait 5 minutes before exploring further.', 300000);
