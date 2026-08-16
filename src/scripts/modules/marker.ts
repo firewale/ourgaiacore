@@ -1,11 +1,28 @@
+import { Marker, Popup, type MapLibreMap } from 'maplibre-gl';
 import type { ArticleCategory } from './wikipedia.js';
+import type { Coordinate } from './coordinate.js';
+import { toLngLat } from './coordinate.js';
 
-export function getCircleIcon(color: string = 'red'): google.maps.marker.PinElement {
-  return new google.maps.marker.PinElement({
-    background: color,
-    borderColor: 'white',
-    glyphColor: 'white',
-  });
+function buildPinElement(background: string, glyph?: string): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'og-marker-pin';
+  el.style.width = '30px';
+  el.style.height = '30px';
+  // No inline `position` here — MapLibre's own `.maplibregl-marker` CSS class
+  // sets `position: absolute`, which it relies on for transform-based
+  // repositioning on pan/zoom. An inline override would beat that class rule
+  // and leave the marker in normal document flow instead.
+  el.innerHTML = `
+    <svg width="30" height="30" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 0C7.58 0 4 3.58 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z" fill="${background}" stroke="white" stroke-width="1.5"/>
+    </svg>
+    ${glyph ? `<span class="og-marker-glyph" style="position:absolute;top:3px;left:0;width:100%;text-align:center;font-size:12px;line-height:14px;pointer-events:none;">${glyph}</span>` : ''}
+  `;
+  return el;
+}
+
+export function getCircleIcon(color: string = 'red'): HTMLElement {
+  return buildPinElement(color);
 }
 
 export const CATEGORY_STYLE: Record<ArticleCategory, { color: string; glyph: string }> = {
@@ -42,63 +59,50 @@ export const CATEGORY_STYLE: Record<ArticleCategory, { color: string; glyph: str
   default:   { color: '#546E7A', glyph: '?' },
 };
 
-export function getCategoryIcon(category: ArticleCategory = 'default'): google.maps.marker.PinElement {
+export function getCategoryIcon(category: ArticleCategory = 'default'): HTMLElement {
   const style = CATEGORY_STYLE[category] ?? CATEGORY_STYLE.default;
-  return new google.maps.marker.PinElement({
-    background: style.color,
-    borderColor: 'white',
-    glyphColor: 'white',
-    glyph: style.glyph,
-  });
+  return buildPinElement(style.color, style.glyph);
 }
 
-let sharedInfoWindow: google.maps.InfoWindow | null = null;
+let sharedPopup: Popup | null = null;
 
-function getSharedInfoWindow(): google.maps.InfoWindow {
-  if (!sharedInfoWindow) {
-    sharedInfoWindow = new google.maps.InfoWindow();
-    google.maps.event.addListener(sharedInfoWindow, 'domready', () => {
-      document.querySelector('.og-popup__close')?.addEventListener('click', () => {
-        sharedInfoWindow?.close();
-      });
-    });
+function getSharedPopup(): Popup {
+  if (!sharedPopup) {
+    sharedPopup = new Popup({ closeButton: false, closeOnClick: false });
   }
-  return sharedInfoWindow;
+  return sharedPopup;
 }
 
-export function _resetSharedInfoWindow(): void {
-  sharedInfoWindow = null;
+export function _resetSharedPopup(): void {
+  sharedPopup = null;
+}
+
+function openPopup(map: MapLibreMap, coord: Coordinate, popupContent: string): void {
+  const popup = getSharedPopup();
+  popup.setLngLat(toLngLat(coord)).setHTML(popupContent).addTo(map);
+  popup.getElement()?.querySelector('.og-popup__close')?.addEventListener('click', () => {
+    popup.remove();
+  });
 }
 
 export function placeMapMarker(
-  map: google.maps.Map,
-  latLng: google.maps.LatLng,
+  map: MapLibreMap,
+  coord: Coordinate,
   title: string,
   popupContent?: string,
-  pin?: google.maps.marker.PinElement,
+  pin?: HTMLElement,
   startopen?: boolean
-): google.maps.marker.AdvancedMarkerElement {
-  const marker = new google.maps.marker.AdvancedMarkerElement({
-    position: latLng,
-    map,
-    title,
-    content: pin,
-    gmpClickable: popupContent !== undefined,
-  });
+): Marker {
+  const marker = new Marker(pin ? { element: pin, anchor: 'bottom' } : { anchor: 'bottom' })
+    .setLngLat(toLngLat(coord))
+    .addTo(map);
+  marker.getElement().title = title;
 
   if (popupContent === undefined) return marker;
 
-  marker.addEventListener('gmp-click', () => {
-    const iw = getSharedInfoWindow();
-    iw.setContent(popupContent);
-    iw.open({ anchor: marker, map });
-  });
+  marker.getElement().addEventListener('click', () => openPopup(map, coord, popupContent));
 
-  if (startopen) {
-    const iw = getSharedInfoWindow();
-    iw.setContent(popupContent);
-    iw.open({ anchor: marker, map });
-  }
+  if (startopen) openPopup(map, coord, popupContent);
 
   return marker;
 }

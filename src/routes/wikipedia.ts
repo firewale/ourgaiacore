@@ -103,20 +103,27 @@ function classifyByTitle(title: string): ArticleCategory {
   return 'default';
 }
 
+const MAX_BBOX_DEGREES = 2; // sanity cap — this endpoint is publicly reachable directly, not just via the client's padding logic
+
 wikipediaRouter.get('/', async (req, res) => {
-  const lat = parseFloat(req.query.lat as string);
-  const lng = parseFloat(req.query.lng as string);
-  if (isNaN(lat) || isNaN(lng)) {
-    res.status(400).json({ error: 'lat and lng query params are required and must be numbers' });
+  const north = parseFloat(req.query.north as string);
+  const south = parseFloat(req.query.south as string);
+  const east = parseFloat(req.query.east as string);
+  const west = parseFloat(req.query.west as string);
+  if (isNaN(north) || isNaN(south) || isNaN(east) || isNaN(west)) {
+    res.status(400).json({ error: 'north, south, east and west query params are required and must be numbers' });
+    return;
+  }
+  if (north <= south || east <= west) {
+    res.status(400).json({ error: 'bounds are invalid: north must be greater than south and east must be greater than west' });
+    return;
+  }
+  if (north - south > MAX_BBOX_DEGREES || east - west > MAX_BBOX_DEGREES) {
+    res.status(400).json({ error: `bounding box too large: each side must be at most ${MAX_BBOX_DEGREES} degrees` });
     return;
   }
 
-  const zoomRaw = parseInt(req.query.zoom as string, 10);
-  const zoom = isNaN(zoomRaw) ? 14 : Math.max(1, Math.min(20, zoomRaw));
-  // Scale radius to match visible map area: zoom 14 → 5km, zoom 13 → 10km (max), below 13 → capped at 10km
-  const radius = Math.min(10000, Math.round(5000 * Math.pow(2, 14 - zoom)));
-
-  const geoCacheKey = `wiki:geo:${lat.toFixed(2)}:${lng.toFixed(2)}:${zoom}`;
+  const geoCacheKey = `wiki:geo:${north}:${south}:${east}:${west}`;
 
   // Layer 1: Redis geo cache
   if (isRedisReady()) {
@@ -136,9 +143,8 @@ wikipediaRouter.get('/', async (req, res) => {
   // Layer 2: Wikipedia geosearch
   const geoParams = new URLSearchParams({
     list: 'geosearch',
-    gscoord: `${lat}|${lng}`,
-    gsradius: String(radius),
-    gslimit: '100',
+    gsbbox: `${north}|${west}|${south}|${east}`,
+    gslimit: '500',
   });
 
   let geoRes: Response;
@@ -209,7 +215,7 @@ wikipediaRouter.get('/', async (req, res) => {
 
   // Batch-fetch uncached articles from Wikipedia (max 20 pageids per request).
   // Batches are independent requests, so run them concurrently rather than
-  // sequentially — with a full viewport (up to 100 geosearch results / 5
+  // sequentially — with a full viewport (up to 500 geosearch results / 25
   // batches), sequential fetching was adding several seconds of latency.
   const batches: WikiArticle[][] = [];
   for (let i = 0; i < uncachedArticles.length; i += ARTICLE_BATCH_SIZE) {

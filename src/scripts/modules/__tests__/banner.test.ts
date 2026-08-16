@@ -12,7 +12,16 @@ describe('showBanner', () => {
     showBanner('Something went wrong');
     const banner = document.getElementById('error-banner')!;
     expect(banner.hasAttribute('hidden')).toBe(false);
-    expect(banner.textContent).toBe('Something went wrong');
+    expect(banner.querySelector('.error-banner__text')?.textContent).toBe('Something went wrong');
+  });
+
+  it('includes a close button that dismisses the banner on click', () => {
+    showBanner('Something went wrong');
+    const banner = document.getElementById('error-banner')!;
+    const closeBtn = banner.querySelector<HTMLButtonElement>('.error-banner__close');
+    expect(closeBtn).not.toBeNull();
+    closeBtn!.click();
+    expect(banner.hasAttribute('hidden')).toBe(true);
   });
 
   it('auto-dismisses after the specified duration', () => {

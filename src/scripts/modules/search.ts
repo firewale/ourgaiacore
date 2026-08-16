@@ -1,4 +1,5 @@
 import * as geolocationModule from './geolocation.js';
+import type { Coordinate } from './coordinate.js';
 import { showBanner, hideBanner } from './banner.js';
 
 let geolocationLocal: typeof geolocationModule;
@@ -8,7 +9,7 @@ let resultsListRef: HTMLElement;
 export function BuildSearchControl(
   controlDiv: HTMLDivElement,
   geolocation: typeof geolocationModule,
-  setLocationCallback: (latLng: google.maps.LatLng) => void
+  setLocationCallback: (coord: Coordinate) => void
 ): void {
   geolocationLocal = geolocation;
 
@@ -53,7 +54,7 @@ function hideResults(): void {
 
 function showResults(
   choices: geolocationModule.GeocodeChoice[],
-  setLocationCallback: (latLng: google.maps.LatLng) => void
+  setLocationCallback: (coord: Coordinate) => void
 ): void {
   resultsListRef.replaceChildren();
   for (const choice of choices) {
@@ -64,7 +65,7 @@ function showResults(
     item.addEventListener('click', () => {
       hideBanner();
       hideResults();
-      setLocationCallback(new google.maps.LatLng(choice.latitude, choice.longitude));
+      setLocationCallback({ lat: choice.latitude, lng: choice.longitude });
     });
     resultsListRef.appendChild(item);
   }
@@ -72,7 +73,7 @@ function showResults(
 }
 
 async function search(
-  setLocationCallback: (latLng: google.maps.LatLng) => void
+  setLocationCallback: (coord: Coordinate) => void
 ): Promise<void> {
   const searchTerm = searchInputRef.value.trim();
 
@@ -86,8 +87,7 @@ async function search(
   const result = await geolocationLocal.codeAddress(searchTerm);
   if (result.status === 'success') {
     hideBanner();
-    const latLng = new google.maps.LatLng(result.latitude, result.longitude);
-    setLocationCallback(latLng);
+    setLocationCallback({ lat: result.latitude, lng: result.longitude });
   } else if (result.status === 'multiple') {
     hideBanner();
     showResults(result.choices, setLocationCallback);

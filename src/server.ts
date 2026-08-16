@@ -15,7 +15,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      'connect-src': ["'self'", 'https://tiles.openfreemap.org'],
+      'img-src': ["'self'", 'data:', 'https://tiles.openfreemap.org', 'https://en.wikipedia.org'],
+      'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      'font-src': ["'self'", 'https://fonts.gstatic.com', 'data:'],
+      'worker-src': ["'self'", 'blob:'],
+    },
+  },
+}));
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

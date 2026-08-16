@@ -2,26 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getCurrentPosition, codeAddress } from '../geolocation.js';
 import * as geocode from '../geocode.js';
 
-class MockLatLng {
-  constructor(public lat: number, public lng: number) {}
-}
-
-const mockGeocode = vi.fn();
-
 beforeEach(() => {
-  vi.stubGlobal('google', {
-    maps: {
-      LatLng: MockLatLng,
-      Geocoder: vi.fn(() => ({ geocode: mockGeocode })),
-      GeocoderStatus: { OK: 'OK' },
-    },
-  });
+  document.body.innerHTML = '<div id="error-banner" hidden></div>';
   vi.clearAllMocks();
   vi.spyOn(geocode, 'searchAddress').mockResolvedValue({ status: 'error' });
 });
 
+function getBanner(): HTMLElement {
+  return document.getElementById('error-banner') as HTMLElement;
+}
+
 describe('getCurrentPosition', () => {
-  it('resolves with a LatLng when geolocation succeeds', async () => {
+  it('resolves with a coordinate when geolocation succeeds', async () => {
     Object.defineProperty(navigator, 'geolocation', {
       value: {
         getCurrentPosition: vi.fn((success) =>
@@ -32,9 +24,8 @@ describe('getCurrentPosition', () => {
     });
 
     const result = await getCurrentPosition();
-    expect(result).toBeInstanceOf(MockLatLng);
-    expect((result as unknown as MockLatLng).lat).toBe(40.71);
-    expect((result as unknown as MockLatLng).lng).toBe(-74.0);
+    expect(result).toEqual({ lat: 40.71, lng: -74.0 });
+    expect(getBanner().hasAttribute('hidden')).toBe(true);
   });
 
   it('passes a finite timeout so an unanswered permission prompt cannot hang forever', async () => {
@@ -64,9 +55,10 @@ describe('getCurrentPosition', () => {
       configurable: true,
     });
 
-    const result = await getCurrentPosition() as unknown as MockLatLng;
-    expect(result.lat).toBe(35.22);
-    expect(result.lng).toBe(-80.84);
+    const result = await getCurrentPosition();
+    expect(result).toEqual({ lat: 35.22, lng: -80.84 });
+    expect(getBanner().hasAttribute('hidden')).toBe(false);
+    expect(getBanner().textContent).toContain('Location Services');
   });
 
   it('falls back to Charlotte when navigator.geolocation is unavailable', async () => {
@@ -75,35 +67,14 @@ describe('getCurrentPosition', () => {
       configurable: true,
     });
 
-    const result = await getCurrentPosition() as unknown as MockLatLng;
-    expect(result.lat).toBe(35.22);
-    expect(result.lng).toBe(-80.84);
+    const result = await getCurrentPosition();
+    expect(result).toEqual({ lat: 35.22, lng: -80.84 });
+    expect(getBanner().hasAttribute('hidden')).toBe(false);
+    expect(getBanner().textContent).toContain('Location Services');
   });
 });
 
 describe('codeAddress', () => {
-  it('resolves with success status and coordinates on OK geocoder result', async () => {
-    mockGeocode.mockImplementation((_req: unknown, callback: Function) => {
-      callback(
-        [{ geometry: { location: { lat: () => 51.5, lng: () => -0.12 } } }],
-        'OK'
-      );
-    });
-
-    // Use an address not in the hardcoded lookup table so the Geocoder mock is exercised
-    const result = await codeAddress('1 Infinite Loop, Cupertino');
-    expect(result).toEqual({ status: 'success', latitude: 51.5, longitude: -0.12 });
-  });
-
-  it('resolves with error status on geocoder failure', async () => {
-    mockGeocode.mockImplementation((_req: unknown, callback: Function) => {
-      callback(null, 'ZERO_RESULTS');
-    });
-
-    const result = await codeAddress('xyznonexistent');
-    expect(result).toEqual({ status: 'error', message: 'ZERO_RESULTS' });
-  });
-
   it('tries Nominatim even for an address in the hardcoded lookup table', async () => {
     const searchAddressSpy = vi.spyOn(geocode, 'searchAddress').mockResolvedValue({ status: 'error' });
 
@@ -126,7 +97,6 @@ describe('codeAddress', () => {
 
     const result = await codeAddress('nyungwe');
 
-    expect(mockGeocode).not.toHaveBeenCalled();
     expect(result.status).toBe('multiple');
   });
 
@@ -135,11 +105,10 @@ describe('codeAddress', () => {
 
     const result = await codeAddress('charlotte');
 
-    expect(mockGeocode).not.toHaveBeenCalled();
     expect(result).toEqual({ status: 'success', latitude: 35.2271, longitude: -80.8431 });
   });
 
-  it('resolves with success from Nominatim without calling the Google Geocoder', async () => {
+  it('resolves with success from Nominatim', async () => {
     vi.spyOn(geocode, 'searchAddress').mockResolvedValue({
       status: 'ok',
       places: [{ latitude: 51.5, longitude: -0.12, displayName: 'Big Ben, London' }],
@@ -147,7 +116,6 @@ describe('codeAddress', () => {
 
     const result = await codeAddress('Big Ben');
 
-    expect(mockGeocode).not.toHaveBeenCalled();
     expect(result).toEqual({ status: 'success', latitude: 51.5, longitude: -0.12, displayName: 'Big Ben, London' });
   });
 
@@ -162,7 +130,6 @@ describe('codeAddress', () => {
 
     const result = await codeAddress('Springfield');
 
-    expect(mockGeocode).not.toHaveBeenCalled();
     expect(result).toEqual({
       status: 'multiple',
       choices: [
@@ -172,27 +139,19 @@ describe('codeAddress', () => {
     });
   });
 
-  it('falls back to the Google Geocoder when Nominatim is rate-limited', async () => {
+  it('resolves with an error status when Nominatim is rate-limited and no lookup table entry matches', async () => {
     vi.spyOn(geocode, 'searchAddress').mockResolvedValue({ status: 'rate-limited' });
-    mockGeocode.mockImplementation((_req: unknown, callback: Function) => {
-      callback([{ geometry: { location: { lat: () => 40.71, lng: () => -74.0 } } }], 'OK');
-    });
 
     const result = await codeAddress('1 Infinite Loop, Cupertino');
 
-    expect(mockGeocode).toHaveBeenCalled();
-    expect(result).toEqual({ status: 'success', latitude: 40.71, longitude: -74.0 });
+    expect(result).toEqual({ status: 'error', message: 'rate-limited' });
   });
 
-  it('falls back to the Google Geocoder when Nominatim returns not-found', async () => {
+  it('resolves with an error status when Nominatim returns not-found and no lookup table entry matches', async () => {
     vi.spyOn(geocode, 'searchAddress').mockResolvedValue({ status: 'not-found' });
-    mockGeocode.mockImplementation((_req: unknown, callback: Function) => {
-      callback([{ geometry: { location: { lat: () => 40.71, lng: () => -74.0 } } }], 'OK');
-    });
 
     const result = await codeAddress('1 Infinite Loop, Cupertino');
 
-    expect(mockGeocode).toHaveBeenCalled();
-    expect(result).toEqual({ status: 'success', latitude: 40.71, longitude: -74.0 });
+    expect(result).toEqual({ status: 'error', message: 'not-found' });
   });
 });

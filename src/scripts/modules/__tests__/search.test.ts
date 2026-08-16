@@ -2,22 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BuildSearchControl } from '../search.js';
 import * as geolocation from '../geolocation.js';
 
-class MockLatLng {
-  constructor(public lat: number, public lng: number) {}
-}
-
 beforeEach(() => {
-  vi.stubGlobal('google', {
-    maps: {
-      LatLng: MockLatLng,
-      event: {
-        addDomListener: vi.fn((el: HTMLElement, event: string, handler: () => void) => {
-          el.addEventListener(event, handler);
-        }),
-      },
-    },
-  });
-
   document.body.innerHTML = `
     <div id="error-banner" hidden></div>
     <div id="controlstrip" style="visibility:hidden">
@@ -111,9 +96,7 @@ describe('search (via button click)', () => {
     document.getElementById('searchButton')!.click();
 
     await vi.waitFor(() => expect(setLocationCallback).toHaveBeenCalledOnce());
-    const arg = setLocationCallback.mock.calls[0][0] as MockLatLng;
-    expect(arg.lat).toBe(51.5);
-    expect(arg.lng).toBe(-0.12);
+    expect(setLocationCallback).toHaveBeenCalledWith({ lat: 51.5, lng: -0.12 });
     expect(document.getElementById('error-banner')!.hasAttribute('hidden')).toBe(true);
   });
 
@@ -182,9 +165,7 @@ describe('search (via button click)', () => {
     secondItem.click();
 
     expect(setLocationCallback).toHaveBeenCalledOnce();
-    const arg = setLocationCallback.mock.calls[0][0] as MockLatLng;
-    expect(arg.lat).toBe(42.1);
-    expect(arg.lng).toBe(-72.6);
+    expect(setLocationCallback).toHaveBeenCalledWith({ lat: 42.1, lng: -72.6 });
     expect(resultsList.hidden).toBe(true);
   });
 

@@ -40,6 +40,9 @@ function makeArticleResponse(pageId: number, extract: string, categories: string
   };
 }
 
+// A small bounding box centered roughly on Big Ben, used across tests in place of lat/lng.
+const BBOX_QS = 'north=51.51&south=51.49&east=-0.11&west=-0.13';
+
 beforeEach(() => {
   vi.clearAllMocks();
   redisReady = true;
@@ -48,15 +51,33 @@ beforeEach(() => {
 });
 
 describe('GET /api/wikipedia', () => {
-  it('returns 400 when lat and lng are missing', async () => {
+  it('returns 400 when bounds are missing', async () => {
     vi.stubGlobal('fetch', vi.fn());
     const res = await request(makeApp()).get('/');
     expect(res.status).toBe(400);
   });
 
-  it('returns 400 when lat is not a number', async () => {
+  it('returns 400 when a bound is not a number', async () => {
     vi.stubGlobal('fetch', vi.fn());
-    const res = await request(makeApp()).get('/?lat=abc&lng=0');
+    const res = await request(makeApp()).get('/?north=abc&south=51.49&east=-0.11&west=-0.13');
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when north is not greater than south', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const res = await request(makeApp()).get('/?north=51.49&south=51.51&east=-0.11&west=-0.13');
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when east is not greater than west', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const res = await request(makeApp()).get('/?north=51.51&south=51.49&east=-0.13&west=-0.11');
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when the bounding box is too large', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const res = await request(makeApp()).get('/?north=60&south=10&east=10&west=-10');
     expect(res.status).toBe(400);
   });
 
@@ -66,7 +87,7 @@ describe('GET /api/wikipedia', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await request(makeApp()).get('/?lat=51.5&lng=-0.12');
+    const res = await request(makeApp()).get(`/?${BBOX_QS}`);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual(cachedData);
@@ -74,19 +95,26 @@ describe('GET /api/wikipedia', () => {
     expect(mockRedis.setex).not.toHaveBeenCalled();
   });
 
-  it('calls Wikipedia on Redis cache miss and stores result', async () => {
+  it('calls Wikipedia with a gsbbox param and gslimit=500 on Redis cache miss, and stores result', async () => {
     mockRedis.get.mockResolvedValue(null);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([{ title: 'Big Ben', lat: 51.5, lon: -0.12, pageid: 42 }]) })
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeArticleResponse(42, 'Clock tower.') });
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await request(makeApp()).get('/?lat=51.5&lng=-0.12');
+    const res = await request(makeApp()).get(`/?${BBOX_QS}`);
 
     expect(res.status).toBe(200);
     expect(res.body[42].title).toBe('Big Ben');
     expect(res.body[42].extract).toBe('Clock tower.');
     expect(res.body[42].category).toBe('default');
+
+    const geoSearchUrl = fetchMock.mock.calls[0][0] as string;
+    expect(geoSearchUrl).toContain('gsbbox=51.51%7C-0.13%7C51.49%7C-0.11');
+    expect(geoSearchUrl).toContain('gslimit=500');
+    expect(geoSearchUrl).not.toContain('gscoord');
+    expect(geoSearchUrl).not.toContain('gsradius');
+
     const setexCalls = mockRedis.setex.mock.calls;
     const geoCacheCall = setexCalls.find(([key]) => (key as string).startsWith('wiki:geo:'));
     expect(geoCacheCall).toBeTruthy();
@@ -100,7 +128,7 @@ describe('GET /api/wikipedia', () => {
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeArticleResponse(42, 'A museum.', ['Category:Museums in London']) });
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await request(makeApp()).get('/?lat=51.5&lng=-0.17');
+    const res = await request(makeApp()).get(`/?${BBOX_QS}`);
 
     expect(res.status).toBe(200);
     expect(res.body[42].category).toBe('museum');
@@ -115,7 +143,7 @@ describe('GET /api/wikipedia', () => {
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([{ title: 'Big Ben', lat: 51.5, lon: -0.12, pageid: 42 }]) });
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await request(makeApp()).get('/?lat=51.5&lng=-0.12');
+    const res = await request(makeApp()).get(`/?${BBOX_QS}`);
 
     expect(res.status).toBe(200);
     expect(res.body[42].extract).toBe('Cached extract.');
@@ -132,7 +160,7 @@ describe('GET /api/wikipedia', () => {
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([{ title: 'Big Ben', lat: 51.5, lon: -0.12, pageid: 42 }]) });
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await request(makeApp()).get('/?lat=51.5&lng=-0.12');
+    const res = await request(makeApp()).get(`/?${BBOX_QS}`);
 
     expect(res.status).toBe(200);
     expect(res.body[42].extract).toBe('Legacy plain extract.');
@@ -146,7 +174,7 @@ describe('GET /api/wikipedia', () => {
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeArticleResponse(42, 'Clock tower.') });
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await request(makeApp()).get('/?lat=51.5&lng=-0.12');
+    const res = await request(makeApp()).get(`/?${BBOX_QS}`);
 
     expect(res.status).toBe(200);
     expect(res.body[42].title).toBe('Big Ben');
@@ -159,7 +187,7 @@ describe('GET /api/wikipedia', () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 429 });
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await request(makeApp()).get('/?lat=51.5&lng=-0.12');
+    const res = await request(makeApp()).get(`/?${BBOX_QS}`);
     expect(res.status).toBe(429);
   });
 
@@ -168,7 +196,7 @@ describe('GET /api/wikipedia', () => {
     const fetchMock = vi.fn().mockRejectedValueOnce(new Error('network error'));
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await request(makeApp()).get('/?lat=51.5&lng=-0.12');
+    const res = await request(makeApp()).get(`/?${BBOX_QS}`);
     expect(res.status).toBe(502);
   });
 
@@ -179,7 +207,7 @@ describe('GET /api/wikipedia', () => {
       .mockRejectedValueOnce(new Error('article fetch failed'));
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await request(makeApp()).get('/?lat=51.5&lng=-0.12');
+    const res = await request(makeApp()).get(`/?${BBOX_QS}`);
 
     expect(res.status).toBe(200);
     expect(res.body[42].title).toBe('Big Ben');

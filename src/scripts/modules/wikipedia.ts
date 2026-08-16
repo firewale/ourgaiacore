@@ -1,3 +1,5 @@
+import type { Bounds } from './coordinate.js';
+
 const apiUrl = '/api/wikipedia';
 
 export type ArticleCategory =
@@ -13,35 +15,64 @@ export interface WikiArticle {
   category: ArticleCategory;
 }
 
-// Cache keyed by lat/lng rounded to 2 decimal places (~1.1km grid cells).
-// This prevents re-fetching when the map is panned only slightly or revisits an area.
-const cache = new Map<string, Record<number, WikiArticle>>();
+// Cache of previously fetched (padded, rounded) boxes and their results. A new
+// request is served from cache if its raw viewport bounds fall entirely within
+// an already-fetched box — not just on exact match — so zooming in (which shrinks
+// the box) still hits the cache instead of re-fetching, as long as the smaller
+// box is still covered by a wider box fetched moments ago.
+interface CacheEntry { bounds: Bounds; results: Record<number, WikiArticle>; }
+const cache: CacheEntry[] = [];
 
-function cacheKey(latLng: google.maps.LatLng, zoom: number): string {
-  return `${latLng.lat().toFixed(2)},${latLng.lng().toFixed(2)},${zoom}`;
+function padBounds(b: Bounds, factor = 0.5): Bounds {
+  const latPad = (b.north - b.south) * factor;
+  const lngPad = (b.east - b.west) * factor;
+  return {
+    north: b.north + latPad,
+    south: b.south - latPad,
+    east: b.east + lngPad,
+    west: b.west - lngPad,
+  };
+}
+
+// Rounding to ~1.1km grid cells keeps the outgoing request (and thus the server's
+// Redis cache key) stable across near-identical boxes from different sessions.
+function roundBounds(b: Bounds): Bounds {
+  return {
+    north: Number(b.north.toFixed(2)),
+    south: Number(b.south.toFixed(2)),
+    east: Number(b.east.toFixed(2)),
+    west: Number(b.west.toFixed(2)),
+  };
+}
+
+function contains(outer: Bounds, inner: Bounds): boolean {
+  return inner.north <= outer.north && inner.south >= outer.south
+    && inner.east <= outer.east && inner.west >= outer.west;
 }
 
 export function clearCache(): void {
-  cache.clear();
+  cache.length = 0;
 }
 
 export type WikiDataStatus = 'ok' | 'rate-limited' | 'error';
 
 export async function getWikipediaData(
-  latLng: google.maps.LatLng,
-  zoom: number,
+  bounds: Bounds,
   callback: (results: Record<number, WikiArticle>) => void
 ): Promise<WikiDataStatus> {
-  const key = cacheKey(latLng, zoom);
-  if (cache.has(key)) {
-    callback(cache.get(key)!);
+  const cached = cache.find((entry) => contains(entry.bounds, bounds));
+  if (cached) {
+    callback(cached.results);
     return 'ok';
   }
 
-  const lat = latLng.lat();
-  const lng = latLng.lng();
-
-  const params = new URLSearchParams({ lat: String(lat), lng: String(lng), zoom: String(zoom) });
+  const rounded = roundBounds(padBounds(bounds));
+  const params = new URLSearchParams({
+    north: String(rounded.north),
+    south: String(rounded.south),
+    east: String(rounded.east),
+    west: String(rounded.west),
+  });
 
   let apiRes: Response;
   try {
@@ -62,7 +93,7 @@ export async function getWikipediaData(
     return 'error';
   }
 
-  cache.set(key, items);
+  cache.push({ bounds: rounded, results: items });
   callback(items);
   return 'ok';
 }

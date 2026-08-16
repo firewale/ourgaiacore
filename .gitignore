@@ -67,6 +67,7 @@ typings/
 dist/
 public/js/
 dist/client/
+public/maplibre/
 
 # TypeScript cache
 *.tsbuildinfo
