@@ -68,7 +68,7 @@ let sharedPopup: Popup | null = null;
 
 function getSharedPopup(): Popup {
   if (!sharedPopup) {
-    sharedPopup = new Popup({ closeButton: false, closeOnClick: false });
+    sharedPopup = new Popup({ closeButton: false, closeOnClick: false, maxWidth: '380px' });
   }
   return sharedPopup;
 }

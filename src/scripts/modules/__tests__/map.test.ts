@@ -121,7 +121,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetInstances();
   map._resetMapStateForTests();
-  document.body.innerHTML = '<div id="error-banner" hidden></div>';
+  document.body.innerHTML = '<div id="error-banner" hidden></div><div id="loading-bar" hidden></div>';
 });
 
 describe('initialize', () => {
@@ -228,6 +228,51 @@ describe('idle-debounced Wikipedia refetch', () => {
       vi.useRealTimers();
     }
   });
+
+  it('shows the loading bar while a fetch is in flight and hides it once it resolves', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveFetch: (status: 'ok') => void;
+      const pending = new Promise<'ok'>((resolve) => { resolveFetch = resolve; });
+      const wikipediaMod = {
+        getWikipediaData: vi.fn(() => pending),
+      } as unknown as typeof WikipediaModule;
+
+      map.initialize({ lat: 1, lng: 2 }, fakeMarkerMod, wikipediaMod, fakeSearchMod);
+      const instance = getLastInstance();
+      const loadingBarEl = document.getElementById('loading-bar')!;
+
+      instance.fireIdle();
+      await vi.advanceTimersByTimeAsync(800);
+      expect(loadingBarEl.hasAttribute('hidden')).toBe(false);
+
+      resolveFetch!('ok');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(loadingBarEl.hasAttribute('hidden')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides the loading bar even when the fetch comes back rate-limited (regression: bar left spinning forever on non-ok status)', async () => {
+    vi.useFakeTimers();
+    try {
+      const wikipediaMod = {
+        getWikipediaData: vi.fn().mockResolvedValueOnce('rate-limited' as const),
+      } as unknown as typeof WikipediaModule;
+
+      map.initialize({ lat: 1, lng: 2 }, fakeMarkerMod, wikipediaMod, fakeSearchMod);
+      const instance = getLastInstance();
+      const loadingBarEl = document.getElementById('loading-bar')!;
+
+      instance.fireIdle();
+      await vi.advanceTimersByTimeAsync(800);
+
+      expect(loadingBarEl.hasAttribute('hidden')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('recenterToUserLocation', () => {
@@ -302,6 +347,39 @@ describe('plotLandmarks', () => {
 
     expect(markerB.remove).toHaveBeenCalled();
     expect(markerA.remove).not.toHaveBeenCalled();
+  });
+
+  it('does not remove existing markers on a partial (isFinal=false) update, only on the final one', () => {
+    map.initialize({ lat: 0, lng: 0 }, fakeMarkerMod, fakeWikipediaMod, fakeSearchMod);
+    vi.clearAllMocks(); // drop the "you are here" marker call from initialize
+
+    const markerA = makeFakeMarker();
+    const markerB = makeFakeMarker();
+    (fakeMarkerMod.placeMapMarker as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(markerA)
+      .mockReturnValueOnce(markerB);
+
+    // Article A arrives in an initial viewport fetch...
+    map.plotLandmarks({
+      1: { pageId: 1, title: 'A', lat: 1, long: 1, category: 'museum' },
+    }, true);
+    // ...then a pan starts streaming in article B, but hasn't finished yet —
+    // A must stay on the map even though this chunk doesn't mention it.
+    map.plotLandmarks({
+      2: { pageId: 2, title: 'B', lat: 2, long: 2, category: 'park' },
+    }, false);
+
+    expect(fakeMarkerMod.placeMapMarker).toHaveBeenCalledTimes(2);
+    expect(markerA.remove).not.toHaveBeenCalled();
+    expect(markerB.remove).not.toHaveBeenCalled();
+
+    // The final chunk for the new viewport doesn't include A — now it's removed.
+    map.plotLandmarks({
+      2: { pageId: 2, title: 'B', lat: 2, long: 2, category: 'park' },
+    }, true);
+
+    expect(markerA.remove).toHaveBeenCalled();
+    expect(markerB.remove).not.toHaveBeenCalled();
   });
 });
 

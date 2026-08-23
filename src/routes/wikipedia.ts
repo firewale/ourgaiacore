@@ -6,6 +6,9 @@ export const wikipediaRouter = Router();
 const GEO_TTL = 24 * 60 * 60;       // 24 hours
 const EXTRACT_TTL = 7 * 24 * 60 * 60; // 7 days
 const ARTICLE_BATCH_SIZE = 20;       // Wikipedia TextExtracts API limit for exintro extracts per request
+const BATCH_CONCURRENCY = 5;         // firing all batches at once (e.g. 25 for a full 500-result viewport)
+                                      // trips Wikipedia's anonymous rate limit — most come back 429
+const MAX_FETCH_RETRIES = 3;
 
 const WIKI_GEO_URL = 'https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*';
 // No clshow filter — keyword classifier ignores maintenance categories naturally
@@ -52,6 +55,40 @@ const CATEGORY_RULES: Array<{ keywords: string[]; type: ArticleCategory }> = [
   { keywords: ['recording studios', 'record labels', 'music recording'], type: 'recording-studio' },
   { keywords: ['casinos in', 'entertainment venues', 'amusement parks', 'nightclubs'], type: 'entertainment' },
 ];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Retries on 429, honoring Wikipedia's `retry-after` header (typically 1s) —
+// bounded concurrency alone doesn't fully eliminate 429s under bursty load.
+async function fetchWithRetry(url: string, maxRetries = MAX_FETCH_RETRIES): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url);
+    if (res.status !== 429 || attempt >= maxRetries) return res;
+    const retryAfterSec = Number(res.headers.get('retry-after'));
+    await sleep((Number.isFinite(retryAfterSec) && retryAfterSec > 0 ? retryAfterSec : 1) * 1000);
+  }
+}
+
+// Runs `fn` over `items` with at most `limit` calls in flight at once —
+// unbounded Promise.all across dozens of batches is what triggers Wikipedia's
+// rate limiting in the first place.
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    for (let i = next++; i < items.length; i = next++) {
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+function toDict(articles: WikiArticle[]): Record<number, WikiArticle> {
+  return Object.fromEntries(articles.map(a => [a.pageId, a]));
+}
 
 function firstParagraph(html: string): string {
   for (const match of html.matchAll(/<p[^>]*>[\s\S]*?<\/p>/gi)) {
@@ -103,7 +140,11 @@ function classifyByTitle(title: string): ArticleCategory {
   return 'default';
 }
 
-const MAX_BBOX_DEGREES = 2; // sanity cap — this endpoint is publicly reachable directly, not just via the client's padding logic
+// Wikipedia's own geosearch API rejects gsbbox requests wider than ~0.2 degrees
+// per side with a "toobig" error (which we'd otherwise forward as a 502), so this
+// cap must not exceed that. This endpoint is also publicly reachable directly,
+// not just via the client's own clamping logic, so it needs to hold on its own.
+const MAX_BBOX_DEGREES = 0.2;
 
 wikipediaRouter.get('/', async (req, res) => {
   const north = parseFloat(req.query.north as string);
@@ -125,13 +166,26 @@ wikipediaRouter.get('/', async (req, res) => {
 
   const geoCacheKey = `wiki:geo:${north}:${south}:${east}:${west}`;
 
+  // Response body is newline-delimited JSON (one Record<number, WikiArticle>
+  // chunk per line) so the client can plot markers as they resolve instead of
+  // waiting for a full viewport (up to 500 articles / 25 batches) to finish —
+  // that could take a minute-plus for a city with a cold cache. Error paths
+  // below run before any bytes are written, so they can still safely respond
+  // with a plain JSON body instead; Express lets the Content-Type be
+  // overwritten as long as nothing has been flushed yet.
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  const writeChunk = (data: Record<number, WikiArticle>): void => {
+    if (Object.keys(data).length > 0) res.write(JSON.stringify(data) + '\n');
+  };
+
   // Layer 1: Redis geo cache
   if (isRedisReady()) {
     try {
       const cached = await getRedisClient().get(geoCacheKey);
       if (cached) {
         console.log(`[wiki] geo cache hit for ${geoCacheKey}`);
-        res.json(JSON.parse(cached));
+        writeChunk(JSON.parse(cached));
+        res.end();
         return;
       }
       console.log(`[wiki] geo cache miss for ${geoCacheKey}`);
@@ -213,20 +267,31 @@ wikipediaRouter.get('/', async (req, res) => {
     // Continue — uncachedArticles may be partial but we can still fetch from Wikipedia
   }
 
+  // Stream already-resolved (cache-hit) articles immediately — no need to make
+  // the user wait for the live batch fetches below just to see these.
+  const uncachedIds = new Set(uncachedArticles.map(a => a.pageId));
+  writeChunk(toDict(Object.values(items).filter(a => !uncachedIds.has(a.pageId))));
+
   // Batch-fetch uncached articles from Wikipedia (max 20 pageids per request).
-  // Batches are independent requests, so run them concurrently rather than
-  // sequentially — with a full viewport (up to 500 geosearch results / 25
-  // batches), sequential fetching was adding several seconds of latency.
+  // Batches are independent requests, so run them with bounded concurrency
+  // rather than fully sequentially — with a full viewport (up to 500 geosearch
+  // results / 25 batches), sequential fetching was adding several seconds of
+  // latency. Firing them all at once via Promise.all was tried, but Wikipedia's
+  // anonymous rate limit rejects most of a 25-wide burst with 429s.
   const batches: WikiArticle[][] = [];
   for (let i = 0; i < uncachedArticles.length; i += ARTICLE_BATCH_SIZE) {
     batches.push(uncachedArticles.slice(i, i + ARTICLE_BATCH_SIZE));
   }
 
-  const batchResults = await Promise.all(batches.map(async (batch) => {
+  const batchResults = await mapWithConcurrency(batches, BATCH_CONCURRENCY, async (batch) => {
     const pageids = batch.map(a => a.pageId).join('|');
     try {
-      const articleRes = await fetch(`${WIKI_ARTICLE_URL}&pageids=${pageids}`);
-      if (!articleRes.ok) return false;
+      const articleRes = await fetchWithRetry(`${WIKI_ARTICLE_URL}&pageids=${pageids}`);
+      if (!articleRes.ok) {
+        console.error(`[wiki] Batch fetch failed for pageids [${pageids}]: HTTP ${articleRes.status}`);
+        writeChunk(toDict(batch)); // still plot these pins now, with the default category
+        return false;
+      }
       const data = await articleRes.json() as {
         query?: {
           pages?: Record<string, {
@@ -248,12 +313,14 @@ wikipediaRouter.get('/', async (req, res) => {
           newArticleData.set(article.pageId, { extract, category: article.category });
         }
       }
+      writeChunk(toDict(batch));
       return true;
     } catch (err) {
       console.error('[wiki] Batch fetch error:', err);
+      writeChunk(toDict(batch));
       return false;
     }
-  }));
+  });
 
   const allBatchesSucceeded = batchResults.every(Boolean);
 
@@ -264,9 +331,9 @@ wikipediaRouter.get('/', async (req, res) => {
     const redis = getRedisClient();
     if (geoCacheReady) redis.setex(geoCacheKey, GEO_TTL, JSON.stringify(items)).catch(() => {});
     for (const [pageId, data] of newArticleData) {
-      redis.setex(`wiki:article:${pageId}`, EXTRACT_TTL, JSON.stringify(data)).catch(() => {});
+      redis.setex(`wiki:extract:${pageId}`, EXTRACT_TTL, JSON.stringify(data)).catch(() => {});
     }
   }
 
-  res.json(items);
+  res.end();
 });

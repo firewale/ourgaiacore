@@ -9,18 +9,43 @@ import { showBanner, hideBanner } from './banner.js';
 import { buildLegend, collapseLegend } from './legend.js';
 import * as chat from './chat.js';
 import * as mapContext from './mapContext.js';
+import * as loadingBar from './loadingBar.js';
 
 const POPUP_STYLES = `<style>
   @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&display=swap');
+  /* MapLibre's default popup chrome adds a white padded frame around whatever
+     content we give it; strip that so .og-popup's own card fills the popup. */
+  .maplibregl-popup-content {
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+    border-bottom-color: #fefcf0;
+  }
+  .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+    border-top-color: #fefcf0;
+  }
+  .maplibregl-popup-anchor-left .maplibregl-popup-tip {
+    border-right-color: #fefcf0;
+  }
+  .maplibregl-popup-anchor-right .maplibregl-popup-tip {
+    border-left-color: #fefcf0;
+  }
   .og-popup {
     font-family: 'Caveat', cursive;
     font-size: 16px;
     line-height: 24px;
     color: #1a1a1a;
-    max-width: 300px;
+    max-width: min(380px, 90vw);
     min-width: 220px;
     border-radius: 3px;
     overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
   }
   /* Lined paper page */
   .og-popup__page {
@@ -283,15 +308,24 @@ function setupInteractionTracking(): void {
 // (see wikipedia.ts's bounds padding), not a literal viewport-only set — a marker
 // can briefly persist just past the visible edge until the pan clears the padded
 // box too. That's intentional (it's what avoids re-fetching on small pans).
-export function plotLandmarks(results: Record<number, wikipedia.WikiArticle>): void {
+//
+// Results arrive as a series of growing chunks (wikipedia.ts streams articles
+// in as each batch resolves, rather than waiting for the whole viewport), so
+// `results` may only be a partial picture while `isFinal` is false — markers
+// are only ever added on a partial call, never removed, since a pageId that's
+// merely not-yet-arrived isn't the same as one that's genuinely out of view.
+// The final call (isFinal true) reconciles removals against the complete set.
+export function plotLandmarks(results: Record<number, wikipedia.WikiArticle>, isFinal = true): void {
   mapContext.setVisibleArticles(Object.values(results));
 
-  markerRegistry.forEach((entry, pageId) => {
-    if (!(pageId in results)) {
-      entry.marker.remove();
-      markerRegistry.delete(pageId);
-    }
-  });
+  if (isFinal) {
+    markerRegistry.forEach((entry, pageId) => {
+      if (!(pageId in results)) {
+        entry.marker.remove();
+        markerRegistry.delete(pageId);
+      }
+    });
+  }
 
   Object.values(results).forEach((article) => {
     if (markerRegistry.has(article.pageId)) return;
@@ -357,15 +391,23 @@ async function fetchWikipediaForCurrentView(): Promise<void> {
     east: mapBounds.getEast(),
     west: mapBounds.getWest(),
   };
-  const status = await wikipediaLocal.getWikipediaData(bounds, plotLandmarks);
-  if (status === 'rate-limited') {
-    wikipediaRateLimited = true;
-    showBanner('Wikipedia is rate limiting requests — please wait 5 minutes before exploring further.', 300000);
-  } else if (wikipediaRateLimited) {
-    // Only clear the banner if it's the one we showed — an unrelated banner
-    // (e.g. a geolocation notice) may be up and shouldn't be dismissed by this.
-    wikipediaRateLimited = false;
-    hideBanner();
+  loadingBar.beginLoading();
+  try {
+    const status = await wikipediaLocal.getWikipediaData(bounds, plotLandmarks);
+    if (status === 'rate-limited') {
+      wikipediaRateLimited = true;
+      showBanner('Wikipedia is rate limiting requests — please wait 5 minutes before exploring further.', 300000);
+    } else if (wikipediaRateLimited) {
+      // Only clear the banner if it's the one we showed — an unrelated banner
+      // (e.g. a geolocation notice) may be up and shouldn't be dismissed by this.
+      wikipediaRateLimited = false;
+      hideBanner();
+    }
+  } finally {
+    // Always stopped here (not just on the isFinal plotLandmarks call) so a
+    // rate-limited or errored fetch — which never reaches isFinal — doesn't
+    // leave the bar spinning forever.
+    loadingBar.endLoading();
   }
 }
 
@@ -390,4 +432,5 @@ export function _resetMapStateForTests(): void {
   userInteracted = false;
   clearTimeout(idleDebounce);
   idleDebounce = undefined;
+  loadingBar._resetLoadingBarForTests();
 }
