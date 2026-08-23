@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getRedisClient, isRedisReady } from '../lib/redisClient.js';
 import { getCategoryRules, getTitleRules } from '../lib/categoryRules.js';
+import type { CategoryRuleRow } from '../lib/defaultCategoryRules.js';
 import { getCategoryOverrides, setCategoryOverride } from '../lib/articleCategoryOverrides.js';
 import { isValidCategoryId } from '../lib/categories.js';
 import type { ArticleCategory } from '../lib/articleCategory.js';
@@ -76,20 +77,49 @@ function firstParagraph(html: string): string {
   return html;
 }
 
-function classifyCategories(rawCategories: string[]): ArticleCategory {
-  const lower = rawCategories.map(c => c.toLowerCase());
-  for (const rule of getCategoryRules()) {
-    if (lower.some(cat => cat.includes(rule.keyword))) return rule.category;
+// Picks the category with the most distinct matching inputs (raw Wikipedia
+// categories, or — from classifyByTitle — a single title), so an article
+// that legitimately fits more than one category isn't decided purely by
+// which rule happens to sit earliest in priority order. Ties fall back to
+// that priority order, so single-match articles (the common case) and
+// classifyByTitle (which only ever has one input, so can never produce a
+// vote count above 1) behave exactly as before.
+function classify(inputs: string[], rules: CategoryRuleRow[]): ArticleCategory {
+  const votes = new Map<ArticleCategory, { count: number; bestRank: number }>();
+
+  for (const input of inputs) {
+    const matchedForInput = new Set<ArticleCategory>(); // one vote per input, even if
+                                                          // multiple of its keywords hit
+    rules.forEach((rule, rank) => {
+      if (matchedForInput.has(rule.category)) return;
+      if (!input.includes(rule.keyword)) return;
+      matchedForInput.add(rule.category);
+      const entry = votes.get(rule.category) ?? { count: 0, bestRank: rank };
+      entry.count += 1;
+      entry.bestRank = Math.min(entry.bestRank, rank);
+      votes.set(rule.category, entry);
+    });
   }
-  return 'default';
+
+  let winner: ArticleCategory = 'default';
+  let winnerCount = 0;
+  let winnerRank = Infinity;
+  for (const [category, { count, bestRank }] of votes) {
+    if (count > winnerCount || (count === winnerCount && bestRank < winnerRank)) {
+      winner = category;
+      winnerCount = count;
+      winnerRank = bestRank;
+    }
+  }
+  return winner;
+}
+
+function classifyCategories(rawCategories: string[]): ArticleCategory {
+  return classify(rawCategories.map(c => c.toLowerCase()), getCategoryRules());
 }
 
 function classifyByTitle(title: string): ArticleCategory {
-  const lower = title.toLowerCase();
-  for (const rule of getTitleRules()) {
-    if (lower.includes(rule.keyword)) return rule.category;
-  }
-  return 'default';
+  return classify([title.toLowerCase()], getTitleRules());
 }
 
 // Wikipedia's own geosearch API rejects gsbbox requests wider than ~0.2 degrees

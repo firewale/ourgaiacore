@@ -63,6 +63,13 @@ export const DEFAULT_CATEGORY_RULES: CategoryRuleRow[] = [
   { keyword: 'ports of', category: 'transport' },
   { keyword: 'ports in', category: 'transport' },
   { keyword: 'port of', category: 'transport' },
+  // 'ghost-town'/'demolished' are checked before every 'city' keyword below,
+  // not just each other — "Ghost towns in X" and "Former settlements in X"
+  // also incidentally contain "towns in"/"settlements in", and a place that
+  // no longer functions as a settlement should always win that overlap.
+  { keyword: 'ghost town', category: 'ghost-town' },
+  { keyword: 'former settlement', category: 'ghost-town' },
+  { keyword: 'demolished', category: 'demolished' },
   { keyword: 'cities in', category: 'city' },
   { keyword: 'cities of', category: 'city' },
   { keyword: 'towns in', category: 'city' },
@@ -90,12 +97,9 @@ export const DEFAULT_CATEGORY_RULES: CategoryRuleRow[] = [
   { keyword: 'hamlets in', category: 'city' },
   { keyword: 'county seats of', category: 'city' },
   { keyword: 'settlements in', category: 'city' },
-  { keyword: 'demolished', category: 'demolished' },
   { keyword: 'shopping mall', category: 'shopping' },
   { keyword: 'shopping center', category: 'shopping' },
   { keyword: 'shopping district', category: 'shopping' },
-  { keyword: 'ghost town', category: 'ghost-town' },
-  { keyword: 'former settlement', category: 'ghost-town' },
   { keyword: 'neighborhoods in', category: 'neighborhood' },
   { keyword: 'districts of', category: 'neighborhood' },
   { keyword: 'sectors of', category: 'neighborhood' },

@@ -224,6 +224,39 @@ describe('GET /api/wikipedia', () => {
     expect(parseNdjson(res.text)[42].category).toBe('museum');
   });
 
+  it('picks the category with the most matching raw categories when more than one matches (regression: Rhyolite, NV misclassified as park instead of ghost-town)', async () => {
+    mockRedis.get.mockResolvedValue(null);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([{ title: 'Rhyolite, Nevada', lat: 36.9, lon: -116.83, pageid: 43 }]) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeArticleResponse(43, 'A ghost town.', [
+        'Category:Ghost towns in Nevada',
+        'Category:Former settlements in Nye County, Nevada',
+        'Category:Death Valley National Park',
+      ]) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(makeApp()).get(`/?${BBOX_QS}`);
+
+    expect(res.status).toBe(200);
+    expect(parseNdjson(res.text)[43].category).toBe('ghost-town');
+  });
+
+  it('falls back to rule priority order when categories tie on vote count (preserves pre-voting first-match behavior)', async () => {
+    mockRedis.get.mockResolvedValue(null);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([{ title: 'Some Place', lat: 51.5, lon: -0.17, pageid: 44 }]) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeArticleResponse(44, 'A place.', [
+        'Category:Museums in London',
+        'Category:Parks in London',
+      ]) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await request(makeApp()).get(`/?${BBOX_QS}`);
+
+    expect(res.status).toBe(200);
+    expect(parseNdjson(res.text)[44].category).toBe('museum');
+  });
+
   it('serves extract and category from Redis cache', async () => {
     mockRedis.get
       .mockResolvedValueOnce(null)
