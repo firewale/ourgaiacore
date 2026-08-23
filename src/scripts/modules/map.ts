@@ -10,6 +10,7 @@ import { buildLegend, collapseLegend } from './legend.js';
 import * as chat from './chat.js';
 import * as mapContext from './mapContext.js';
 import * as loadingBar from './loadingBar.js';
+import * as categories from './categories.js';
 
 const POPUP_STYLES = `<style>
   @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&display=swap');
@@ -157,13 +158,54 @@ const POPUP_STYLES = `<style>
   .og-popup__close:hover {
     background: #f5f5f5;
   }
+  .og-popup__category-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: -2px 0 8px;
+  }
+  .og-popup__category-label {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+    color: #888;
+  }
+  .og-popup__category-edit-btn {
+    background: none;
+    border: none;
+    padding: 1px 3px;
+    margin: 0;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+    opacity: 0.6;
+  }
+  .og-popup__category-edit-btn:hover {
+    opacity: 1;
+  }
+  .og-popup__category-select {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+    padding: 2px 4px;
+    border-radius: 2px;
+    border: 1px solid #ccc;
+    background: #fffef8;
+    color: #333;
+  }
+  .og-popup__category-status {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10px;
+    color: #888;
+  }
 </style>`;
 
 function buildPopupContent(article: wikipedia.WikiArticle): string {
-  const style = marker.CATEGORY_STYLE[article.category] ?? marker.CATEGORY_STYLE.default;
+  const style = categories.getCategoryStyle(article.category);
   const wikiUrl = `https://en.wikipedia.org/?curid=${article.pageId}`;
   const bodyHtml = article.extract ?? '<p>No description available.</p>';
   const bodyClass = article.extract ? 'og-popup__body' : 'og-popup__body og-popup__body--empty';
+  const categoryOptions = categories.getCategories()
+    .map((cat) => `<option value="${cat.id}"${cat.id === article.category ? ' selected' : ''}>${cat.label}</option>`)
+    .join('');
 
   return `${POPUP_STYLES}
 <div class="og-popup" style="--cat-color:${style.color}">
@@ -177,9 +219,88 @@ function buildPopupContent(article: wikipedia.WikiArticle): string {
       <span class="og-popup__glyph">${style.glyph}</span>
       <h3 class="og-popup__title">${article.title}</h3>
     </div>
+    <div class="og-popup__category-row">
+      <span class="og-popup__category-label">${style.label}</span>
+      <button type="button" class="og-popup__category-edit-btn" aria-label="Edit category" title="Edit category">✏️</button>
+      <select class="og-popup__category-select" aria-label="Category" hidden>${categoryOptions}</select>
+      <span class="og-popup__category-status"></span>
+    </div>
     <div class="${bodyClass}">${bodyHtml}</div>
   </div>
 </div>`;
+}
+
+// Wires the category <select> in an already-open popup for `article` to
+// persist edits via the API, then swaps the marker (icon/glyph/color and
+// popup content all derive from `article.category`) to reflect the change.
+// `article` is the same object referenced by wikipedia.ts's cache and
+// mapContext's visible-articles list, so mutating `.category` here keeps
+// both in sync without extra plumbing.
+function wireCategoryEditor(popupEl: HTMLElement, article: wikipedia.WikiArticle): void {
+  const label = popupEl.querySelector<HTMLElement>('.og-popup__category-label');
+  const editBtn = popupEl.querySelector<HTMLButtonElement>('.og-popup__category-edit-btn');
+  const select = popupEl.querySelector<HTMLSelectElement>('.og-popup__category-select');
+  const status = popupEl.querySelector<HTMLElement>('.og-popup__category-status');
+  if (!label || !editBtn || !select) return;
+
+  const collapse = (): void => {
+    select.hidden = true;
+    label.hidden = false;
+    editBtn.hidden = false;
+  };
+
+  editBtn.addEventListener('click', () => {
+    label.hidden = true;
+    editBtn.hidden = true;
+    select.hidden = false;
+    select.focus();
+    select.showPicker?.();
+  });
+
+  // Most edits are opened, then abandoned without a change — collapse back to
+  // the compact label instead of leaving the dropdown stuck open.
+  select.addEventListener('blur', () => {
+    if (select.value === article.category) collapse();
+  });
+
+  select.addEventListener('change', async () => {
+    const previousCategory = article.category;
+    const newCategory = select.value as wikipedia.ArticleCategory;
+    if (status) status.textContent = 'Saving…';
+
+    const ok = await wikipediaLocal.setArticleCategory(article.pageId, newCategory);
+    if (!ok) {
+      select.value = previousCategory;
+      if (status) status.textContent = 'Failed to save';
+      return;
+    }
+
+    article.category = newCategory;
+
+    const entry = markerRegistry.get(article.pageId);
+    if (entry) {
+      entry.marker.remove();
+      const coord: Coordinate = { lat: article.lat, lng: article.long };
+      const newMarker = markerLocal.placeMapMarker(
+        map,
+        coord,
+        article.title,
+        buildPopupContent(article),
+        markerLocal.getCategoryIcon(newCategory),
+        true, // reopen the (shared) popup so the save confirmation stays visible
+        (popupEl2) => {
+          wireCategoryEditor(popupEl2, article);
+          const statusEl = popupEl2.querySelector<HTMLElement>('.og-popup__category-status');
+          if (statusEl) {
+            statusEl.textContent = 'Saved';
+            setTimeout(() => { statusEl.textContent = ''; }, 1500);
+          }
+        }
+      );
+      markerRegistry.set(article.pageId, { marker: newMarker, category: newCategory });
+      if (hiddenCategories.has(newCategory)) newMarker.remove();
+    }
+  });
 }
 
 const WELCOME_POPUP_HTML = `${POPUP_STYLES}
@@ -336,7 +457,9 @@ export function plotLandmarks(results: Record<number, wikipedia.WikiArticle>, is
       coord,
       article.title,
       buildPopupContent(article),
-      markerLocal.getCategoryIcon(article.category)
+      markerLocal.getCategoryIcon(article.category),
+      undefined,
+      (popupEl) => wireCategoryEditor(popupEl, article)
     );
     markerRegistry.set(article.pageId, { marker: m, category: article.category });
 

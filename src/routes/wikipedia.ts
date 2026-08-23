@@ -1,5 +1,11 @@
 import { Router } from 'express';
 import { getRedisClient, isRedisReady } from '../lib/redisClient.js';
+import { getCategoryRules, getTitleRules } from '../lib/categoryRules.js';
+import { getCategoryOverrides, setCategoryOverride } from '../lib/articleCategoryOverrides.js';
+import { isValidCategoryId } from '../lib/categories.js';
+import type { ArticleCategory } from '../lib/articleCategory.js';
+
+export type { ArticleCategory } from '../lib/articleCategory.js';
 
 export const wikipediaRouter = Router();
 
@@ -16,45 +22,8 @@ const WIKI_ARTICLE_URL =
   'https://en.wikipedia.org/w/api.php?format=json&action=query' +
   '&prop=extracts|categories&exintro=1&clshow=!hidden&cllimit=500&origin=*';
 
-export type ArticleCategory =
-  | 'museum' | 'worship' | 'park' | 'historic'
-  | 'education' | 'transport' | 'city' | 'demolished' | 'shopping' | 'ghost-town' | 'waterway' | 'neighborhood' | 'plane-crash' | 'hospital' | 'landform' | 'urban-legend' | 'food-and-drink' | 'art' | 'natural-disaster' | 'sport' | 'infrastructure' | 'event' | 'industry' | 'community' | 'maritime' | 'tech' | 'performing-arts' | 'trail' | 'recording-studio' | 'entertainment' | 'default';
-
 interface GeoSearchItem { title: string; lat: number; lon: number; pageid: number; }
 interface WikiArticle { title: string; lat: number; long: number; pageId: number; extract?: string; category: ArticleCategory; }
-
-const CATEGORY_RULES: Array<{ keywords: string[]; type: ArticleCategory }> = [
-  { keywords: ['museum', 'gallery', 'galleries'], type: 'museum' },
-  { keywords: ['church', 'cathedral', 'chapel', 'mosque', 'synagogue', 'temple', 'monastery', 'abbey', 'gurdwara', 'religious buildings and structures', 'roman catholic', 'dioceses', 'archdiocese', 'parishes'], type: 'worship' },
-  { keywords: ['park', 'garden', 'nature reserve', 'wildlife', 'forest'], type: 'park' },
-  { keywords: ['listed building', 'heritage', 'historic', 'castle', 'palace', 'fort', 'ruins', 'archaeological', 'houses in', 'skyscraper', 'office buildings', 'mixed-use developments', 'residential buildings', 'high-rise buildings', 'buildings and structures in', 'battles of', 'battles involving'], type: 'historic' },
-  { keywords: ['university', 'college', 'school', 'academy', 'library'], type: 'education' },
-  { keywords: ['station', 'airport', 'railway', 'bridge', 'canal', 'harbor', 'harbour', 'ports of', 'ports in', 'port of'], type: 'transport' },
-  { keywords: ['cities in', 'census-designated places in', 'incorporated cities and towns', 'unincorporated communities in', 'counties in', 'metropolitan areas', 'metropolitan statistical areas'], type: 'city' },
-  { keywords: ['demolished'], type: 'demolished' },
-  { keywords: ['shopping mall', 'shopping center', 'shopping district'], type: 'shopping' },
-  { keywords: ['ghost town', 'former settlement'], type: 'ghost-town' },
-  { keywords: ['neighborhoods in', 'districts of', 'sectors of', 'populated places in', 'suburbs of', 'streets in'], type: 'neighborhood' },
-  { keywords: ['aviation accidents', 'airliner accidents'], type: 'plane-crash' },
-  { keywords: ['hospitals in', 'hospital buildings'], type: 'hospital' },
-  { keywords: ['rivers of', 'creeks of', 'streams of', 'tributaries of', 'bodies of water', 'aquifers in', 'lakes in', 'reservoirs in', 'bays of', 'islands of'], type: 'waterway' },
-  { keywords: ['canyons and gorges', 'valleys of', 'landforms of', 'hills of', 'mountains of', 'mountain ranges of'], type: 'landform' },
-  { keywords: ['urban legend', 'folklore', 'ghosts', 'cryptid'], type: 'urban-legend' },
-  { keywords: ['food and drink', 'chocolate companies', 'cuisine of', 'breweries', 'wineries', 'restaurants', 'distilleries'], type: 'food-and-drink' },
-  { keywords: ['sculpture', 'public art', 'murals', 'street art', 'art installations'], type: 'art' },
-  { keywords: ['natural disasters', 'earthquakes in', 'floods in', 'wildfires in', 'tornadoes in', 'hurricanes in'], type: 'natural-disaster' },
-  { keywords: ['golf clubs and courses', 'sports venues', 'stadiums in', 'arenas in', 'racetracks in', 'swimming venues', 'athletic', 'athletic conference', 'sports league', 'football clubs', 'association football', 'rugby clubs', 'cricket clubs', 'basketball teams', 'baseball teams', 'sports clubs', 'league clubs', 'sports teams'], type: 'sport' },
-  { keywords: ['air traffic control', 'power stations in', 'power plants in', 'sewage', 'water treatment', 'telecommunications', 'radio stations in', 'television stations in', 'pipelines', 'substations', 'area codes in', 'electric power companies', 'power companies of', 'energy companies', 'government-owned energy'], type: 'infrastructure' },
-  { keywords: ['festivals in', 'recurring events', 'annual events', 'fairs in', 'parades in', 'convention centers'], type: 'event' },
-  { keywords: ['assembly plants', 'manufacturing', 'factories', 'industrial buildings', 'mills in', 'refineries', 'canneries', 'foundries', 'central banks', 'federal reserve', 'banks of', 'banks established', 'financial services companies', 'agriculture companies', 'investment companies', 'organisations based in', 'economy of'], type: 'industry' },
-  { keywords: ['non-profit organizations', 'charities', 'community organizations', 'historical societies', 'volunteer', 'advocacy', 'newspapers published in', 'magazines published in', 'mass media in', 'city council', 'government of', 'city councils', 'ministries of', 'government agencies', 'diplomatic missions', 'national lower houses', 'national upper houses', 'politics of'], type: 'community' },
-  { keywords: ['shipwrecks', 'ships built in', 'naval vessels', 'maritime incidents', 'submarines of', 'destroyers', 'battleships', 'cruisers'], type: 'maritime' },
-  { keywords: ['video game companies', 'software companies', 'technology companies', 'semiconductor', 'biotechnology companies', 'computer science', 'internet companies', 'artificial intelligence', 'integrated development environments', 'cloud computing'], type: 'tech' },
-  { keywords: ['music venues', 'theatres in', 'theaters in', 'concert halls', 'opera houses', 'performing arts', 'amphitheaters in'], type: 'performing-arts' },
-  { keywords: ['trails in', 'hiking trails', 'rail trails', 'walking trails'], type: 'trail' },
-  { keywords: ['recording studios', 'record labels', 'music recording'], type: 'recording-studio' },
-  { keywords: ['casinos in', 'entertainment venues', 'amusement parks', 'nightclubs'], type: 'entertainment' },
-];
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -90,6 +59,15 @@ function toDict(articles: WikiArticle[]): Record<number, WikiArticle> {
   return Object.fromEntries(articles.map(a => [a.pageId, a]));
 }
 
+// Manual per-article overrides always win over the keyword classifier —
+// applied at every point articles are written to the response, so an edit
+// takes effect immediately regardless of which cache layer served the data.
+function applyOverrides(record: Record<number, WikiArticle>, overrides: Map<number, ArticleCategory>): void {
+  for (const [pageId, category] of overrides) {
+    if (record[pageId]) record[pageId].category = category;
+  }
+}
+
 function firstParagraph(html: string): string {
   for (const match of html.matchAll(/<p[^>]*>[\s\S]*?<\/p>/gi)) {
     const inner = match[0].replace(/<[^>]+>/g, '').trim();
@@ -100,42 +78,16 @@ function firstParagraph(html: string): string {
 
 function classifyCategories(rawCategories: string[]): ArticleCategory {
   const lower = rawCategories.map(c => c.toLowerCase());
-  for (const rule of CATEGORY_RULES) {
-    if (lower.some(cat => rule.keywords.some(kw => cat.includes(kw)))) return rule.type;
+  for (const rule of getCategoryRules()) {
+    if (lower.some(cat => cat.includes(rule.keyword))) return rule.category;
   }
   return 'default';
 }
 
-const TITLE_RULES: Array<{ keywords: string[]; type: ArticleCategory }> = [
-  { keywords: ['museum', 'gallery'], type: 'museum' },
-  { keywords: ['church', 'cathedral', 'chapel', 'mosque', 'synagogue', 'temple', 'monastery', 'abbey', 'gurdwara', 'cemetery'], type: 'worship' },
-  { keywords: ['park', 'garden', 'shoreline', 'nature reserve', 'wildlife', 'forest', 'open space', 'recreation area'], type: 'park' },
-  { keywords: ['mansion', 'city hall', 'hall of justice', 'historic', 'castle', 'palace', 'fort', 'ruins', 'rancho', 'house', 'tower', 'plaza', '(building)'], type: 'historic' },
-  { keywords: ['university', 'college', 'high school', 'school', 'academy', 'library', 'institute'], type: 'education' },
-  { keywords: ['hospital', 'medical center'], type: 'hospital' },
-  { keywords: ['station', 'airport', 'railway', 'bridge', 'canal', 'port', 'harbour'], type: 'transport' },
-  { keywords: ['creek', 'river', 'stream', 'lake', 'reservoir', 'slough', 'bay', 'estuary', 'island'], type: 'waterway' },
-  { keywords: ['stadium', 'speedway', 'golf course', 'country club', 'arena'], type: 'sport' },
-  { keywords: ['theater', 'theatre', 'amphitheater', 'amphitheatre', 'music hall', 'concert hall', 'opera house'], type: 'performing-arts' },
-  { keywords: ['trail', 'trailhead'], type: 'trail' },
-  { keywords: ['recording studio', 'record label'], type: 'recording-studio' },
-  { keywords: ['casino', 'nightclub'], type: 'entertainment' },
-  { keywords: ['convention center'], type: 'event' },
-  { keywords: ['metropolitan area'], type: 'city' },
-  { keywords: ['federal reserve', 'reserve bank'], type: 'industry' },
-  { keywords: ['hotel', 'inn'], type: 'food-and-drink' },
-  { keywords: ['city council'], type: 'community' },
-  { keywords: ['list of ambassadors', 'ministry of', 'department of', 'senate of', 'national assembly', 'city council', 'city county'], type: 'community' },
-  { keywords: ['energy group', 'power company', 'energy company', 'power and lighting'], type: 'infrastructure' },
-  { keywords: ['bank rwanda', 'bank kenya', 'bank nigeria', 'bank africa'], type: 'industry' },
-  { keywords: ['avenue', ' street'], type: 'neighborhood' },
-  { keywords: ['highrise', 'high rise', 'housing estate'], type: 'neighborhood' },
-];
-
 function classifyByTitle(title: string): ArticleCategory {
   const lower = title.toLowerCase();
-  for (const rule of TITLE_RULES) {
-    if (rule.keywords.some(kw => lower.includes(kw))) return rule.type;
+  for (const rule of getTitleRules()) {
+    if (lower.includes(rule.keyword)) return rule.category;
   }
   return 'default';
 }
@@ -184,7 +136,10 @@ wikipediaRouter.get('/', async (req, res) => {
       const cached = await getRedisClient().get(geoCacheKey);
       if (cached) {
         console.log(`[wiki] geo cache hit for ${geoCacheKey}`);
-        writeChunk(JSON.parse(cached));
+        const data = JSON.parse(cached) as Record<number, WikiArticle>;
+        const cachedOverrides = await getCategoryOverrides(Object.keys(data).map(Number));
+        applyOverrides(data, cachedOverrides);
+        writeChunk(data);
         res.end();
         return;
       }
@@ -228,6 +183,8 @@ wikipediaRouter.get('/', async (req, res) => {
     items[item.pageid] = { title: item.title, lat: item.lat, long: item.lon, pageId: item.pageid, category: 'default' };
   }
 
+  const overrides = await getCategoryOverrides(Object.keys(items).map(Number));
+
   // Layer 3: check Redis per-article cache, collect misses for batch Wikipedia fetch
   const newArticleData = new Map<number, { extract: string; category: ArticleCategory }>();
   const uncachedArticles: WikiArticle[] = [];
@@ -270,7 +227,9 @@ wikipediaRouter.get('/', async (req, res) => {
   // Stream already-resolved (cache-hit) articles immediately — no need to make
   // the user wait for the live batch fetches below just to see these.
   const uncachedIds = new Set(uncachedArticles.map(a => a.pageId));
-  writeChunk(toDict(Object.values(items).filter(a => !uncachedIds.has(a.pageId))));
+  const preResolved = toDict(Object.values(items).filter(a => !uncachedIds.has(a.pageId)));
+  applyOverrides(preResolved, overrides);
+  writeChunk(preResolved);
 
   // Batch-fetch uncached articles from Wikipedia (max 20 pageids per request).
   // Batches are independent requests, so run them with bounded concurrency
@@ -289,7 +248,9 @@ wikipediaRouter.get('/', async (req, res) => {
       const articleRes = await fetchWithRetry(`${WIKI_ARTICLE_URL}&pageids=${pageids}`);
       if (!articleRes.ok) {
         console.error(`[wiki] Batch fetch failed for pageids [${pageids}]: HTTP ${articleRes.status}`);
-        writeChunk(toDict(batch)); // still plot these pins now, with the default category
+        const fallback = toDict(batch); // still plot these pins now, with the default (or overridden) category
+        applyOverrides(fallback, overrides);
+        writeChunk(fallback);
         return false;
       }
       const data = await articleRes.json() as {
@@ -313,11 +274,15 @@ wikipediaRouter.get('/', async (req, res) => {
           newArticleData.set(article.pageId, { extract, category: article.category });
         }
       }
-      writeChunk(toDict(batch));
+      const resolved = toDict(batch);
+      applyOverrides(resolved, overrides);
+      writeChunk(resolved);
       return true;
     } catch (err) {
       console.error('[wiki] Batch fetch error:', err);
-      writeChunk(toDict(batch));
+      const fallback = toDict(batch);
+      applyOverrides(fallback, overrides);
+      writeChunk(fallback);
       return false;
     }
   });
@@ -336,4 +301,30 @@ wikipediaRouter.get('/', async (req, res) => {
   }
 
   res.end();
+});
+
+// Lets the client set a manual category override for a single article
+// (e.g. from the marker popup), overriding whatever the keyword classifier
+// would otherwise produce. Persisted in Postgres — see articleCategoryOverrides.ts
+// for how it's applied on subsequent GET /api/wikipedia responses.
+wikipediaRouter.patch('/:pageId/category', async (req, res) => {
+  const pageId = parseInt(req.params.pageId, 10);
+  if (isNaN(pageId)) {
+    res.status(400).json({ error: 'pageId must be a number' });
+    return;
+  }
+
+  const category = (req.body as { category?: unknown } | undefined)?.category;
+  if (typeof category !== 'string' || !isValidCategoryId(category)) {
+    res.status(400).json({ error: 'category must be a valid category id — see GET /api/categories' });
+    return;
+  }
+
+  try {
+    await setCategoryOverride(pageId, category as ArticleCategory);
+    res.status(204).end();
+  } catch (err) {
+    console.error('[wiki] Failed to save category override:', err);
+    res.status(503).json({ error: 'Could not save category override — database unavailable' });
+  }
 });

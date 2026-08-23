@@ -2,9 +2,10 @@ import type { Bounds } from './coordinate.js';
 
 const apiUrl = '/api/wikipedia';
 
-export type ArticleCategory =
-  | 'museum' | 'worship' | 'park' | 'historic'
-  | 'education' | 'transport' | 'city' | 'demolished' | 'shopping' | 'ghost-town' | 'waterway' | 'neighborhood' | 'plane-crash' | 'hospital' | 'landform' | 'urban-legend' | 'food-and-drink' | 'art' | 'natural-disaster' | 'sport' | 'infrastructure' | 'event' | 'industry' | 'community' | 'maritime' | 'tech' | 'performing-arts' | 'trail' | 'recording-studio' | 'entertainment' | 'default';
+// A category id, e.g. 'museum' or a user-added category's slug. Open-ended
+// (not a closed union) because the valid set now lives in the `categories`
+// table and is user-extensible at runtime — see modules/categories.ts.
+export type ArticleCategory = string;
 
 export interface WikiArticle {
   title: string;
@@ -73,6 +74,25 @@ function contains(outer: Bounds, inner: Bounds): boolean {
 
 export function clearCache(): void {
   cache.length = 0;
+}
+
+// Persists a manual category override for a single article. Callers are
+// expected to update their own in-memory article object's `category` on
+// success — this module doesn't rewrite `cache` entries itself, since the
+// cached WikiArticle objects are shared by reference with every caller.
+export async function setArticleCategory(pageId: number, category: ArticleCategory): Promise<boolean> {
+  try {
+    const res = await fetch(`${apiUrl}/${pageId}/category`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category }),
+    });
+    if (!res.ok) console.error('Failed to save category override:', res.status);
+    return res.ok;
+  } catch (err) {
+    console.error('Category override request failed:', err);
+    return false;
+  }
 }
 
 export type WikiDataStatus = 'ok' | 'rate-limited' | 'error';
