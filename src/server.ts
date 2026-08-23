@@ -9,7 +9,11 @@ import { fileURLToPath } from 'url';
 import { wikipediaRouter } from './routes/wikipedia.js';
 import { chatRouter } from './routes/chat.js';
 import { geocodeRouter } from './routes/geocode.js';
+import { categoriesRouter } from './routes/categories.js';
 import { getRedisClient } from './lib/redisClient.js';
+import { initCategoryRules } from './lib/categoryRules.js';
+import { initArticleCategoryOverrides } from './lib/articleCategoryOverrides.js';
+import { initCategories } from './lib/categories.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,9 +38,17 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/wikipedia', wikipediaRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/geocode', geocodeRouter);
+app.use('/api/categories', categoriesRouter);
 
 // Eagerly initialize Redis so the connection can become ready before requests arrive.
 getRedisClient();
+
+// Loads category classification rules from Postgres (creating/seeding the table
+// on first run). Fire-and-forget: the route already has built-in defaults to
+// classify with while this resolves, and if Postgres is down, it stays on those.
+initCategoryRules();
+initArticleCategoryOverrides();
+initCategories();
 
 // In production (after `npm run build`), serve the Vite-built client from dist/client/.
 // In dev, Vite's own dev server handles the frontend at :5173.

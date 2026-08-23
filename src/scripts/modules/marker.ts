@@ -2,6 +2,7 @@ import { Marker, Popup, type MapLibreMap } from 'maplibre-gl';
 import type { ArticleCategory } from './wikipedia.js';
 import type { Coordinate } from './coordinate.js';
 import { toLngLat } from './coordinate.js';
+import { getCategoryStyle } from './categories.js';
 
 function buildPinElement(background: string, glyph?: string): HTMLElement {
   const el = document.createElement('div');
@@ -25,42 +26,8 @@ export function getCircleIcon(color: string = 'red'): HTMLElement {
   return buildPinElement(color);
 }
 
-export const CATEGORY_STYLE: Record<ArticleCategory, { color: string; glyph: string }> = {
-  museum:    { color: '#9C27B0', glyph: '🏛' },
-  worship:   { color: '#5C6BC0', glyph: '⛪' },
-  park:      { color: '#388E3C', glyph: '🌳' },
-  historic:  { color: '#795548', glyph: '🏰' },
-  education: { color: '#0288D1', glyph: '🎓' },
-  transport: { color: '#F57C00', glyph: '🚉' },
-  city:      { color: '#00897B', glyph: '🏙' },
-  demolished: { color: '#616161', glyph: '🏚' },
-  shopping:  { color: '#E91E63', glyph: '🛍' },
-  'ghost-town': { color: '#4A148C', glyph: '👻' },
-  waterway:  { color: '#0277BD', glyph: '🌊' },
-  neighborhood: { color: '#FF8F00', glyph: '🏘' },
-  'plane-crash': { color: '#B71C1C', glyph: '✈' },
-  hospital:  { color: '#00838F', glyph: '🏥' },
-  landform:  { color: '#6D4C41', glyph: '⛰' },
-  'urban-legend': { color: '#4527A0', glyph: '🔮' },
-  'food-and-drink': { color: '#EF6C00', glyph: '🍽' },
-  art:       { color: '#AD1457', glyph: '🎨' },
-  'natural-disaster': { color: '#E65100', glyph: '⚡' },
-  sport:     { color: '#2E7D32', glyph: '🎾' },
-  infrastructure: { color: '#455A64', glyph: '⚙' },
-  event:     { color: '#7B1FA2', glyph: '🎉' },
-  industry:  { color: '#5D4037', glyph: '🏭' },
-  community: { color: '#00695C', glyph: '🤝' },
-  maritime:  { color: '#01579B', glyph: '⚓' },
-  tech:      { color: '#1565C0', glyph: '💻' },
-  'performing-arts': { color: '#880E4F', glyph: '🎭' },
-  trail:     { color: '#558B2F', glyph: '🥾' },
-  'recording-studio': { color: '#4A148C', glyph: '🎙' },
-  entertainment: { color: '#F9A825', glyph: '🎰' },
-  default:   { color: '#546E7A', glyph: '?' },
-};
-
 export function getCategoryIcon(category: ArticleCategory = 'default'): HTMLElement {
-  const style = CATEGORY_STYLE[category] ?? CATEGORY_STYLE.default;
+  const style = getCategoryStyle(category);
   return buildPinElement(style.color, style.glyph);
 }
 
@@ -77,12 +44,19 @@ export function _resetSharedPopup(): void {
   sharedPopup = null;
 }
 
-function openPopup(map: MapLibreMap, coord: Coordinate, popupContent: string): void {
+function openPopup(
+  map: MapLibreMap,
+  coord: Coordinate,
+  popupContent: string,
+  onOpen?: (popupEl: HTMLElement) => void
+): void {
   const popup = getSharedPopup();
   popup.setLngLat(toLngLat(coord)).setHTML(popupContent).addTo(map);
-  popup.getElement()?.querySelector('.og-popup__close')?.addEventListener('click', () => {
+  const popupEl = popup.getElement();
+  popupEl?.querySelector('.og-popup__close')?.addEventListener('click', () => {
     popup.remove();
   });
+  if (popupEl) onOpen?.(popupEl);
 }
 
 export function placeMapMarker(
@@ -91,7 +65,8 @@ export function placeMapMarker(
   title: string,
   popupContent?: string,
   pin?: HTMLElement,
-  startopen?: boolean
+  startopen?: boolean,
+  onPopupOpen?: (popupEl: HTMLElement) => void
 ): Marker {
   const marker = new Marker(pin ? { element: pin, anchor: 'bottom' } : { anchor: 'bottom' })
     .setLngLat(toLngLat(coord))
@@ -100,9 +75,9 @@ export function placeMapMarker(
 
   if (popupContent === undefined) return marker;
 
-  marker.getElement().addEventListener('click', () => openPopup(map, coord, popupContent));
+  marker.getElement().addEventListener('click', () => openPopup(map, coord, popupContent, onPopupOpen));
 
-  if (startopen) openPopup(map, coord, popupContent);
+  if (startopen) openPopup(map, coord, popupContent, onPopupOpen);
 
   return marker;
 }

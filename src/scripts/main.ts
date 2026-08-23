@@ -7,6 +7,7 @@ import * as marker from './modules/marker.js';
 import * as wikipedia from './modules/wikipedia.js';
 import * as search from './modules/search.js';
 import * as map from './modules/map.js';
+import * as categories from './modules/categories.js';
 
 // MapLibre's own worker-URL auto-detection breaks under both Vite's dev-server
 // dependency pre-bundling and Rollup's production build (the worker's sibling
@@ -15,6 +16,12 @@ import * as map from './modules/map.js';
 setWorkerUrl('/maplibre/maplibre-gl-worker.mjs');
 
 async function initMap(): Promise<void> {
+  // A same-origin, near-instant fetch — worth awaiting so the legend and the
+  // first markers render with the real category list (built-ins plus any
+  // user-added ones) rather than the built-in fallback. Unlike geolocation
+  // below, this isn't a multi-second wait, so blocking on it is fine.
+  await categories.loadCategories();
+
   // Render immediately at a default location rather than blocking on
   // geolocation — which can take several seconds or the full 15s timeout —
   // then silently recenter once (if) the real location resolves.
