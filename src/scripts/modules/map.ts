@@ -367,11 +367,6 @@ class BottomLeftControl implements IControl {
     // re-enable clicks (pointer-events:auto) on elements carrying this class.
     bottomLeftDiv.className = 'maplibregl-ctrl';
 
-    const chatDiv = document.createElement('div');
-    chatDiv.id = 'chatDiv';
-    chat.initialize(chatDiv, () => collapseLegend());
-    bottomLeftDiv.appendChild(chatDiv);
-
     const legendDiv = document.createElement('div');
     legendDiv.id = 'legendDiv';
     buildLegend(legendDiv, (category, enabled) => {
@@ -380,6 +375,11 @@ class BottomLeftControl implements IControl {
       filterByCategories(hiddenCategories);
     }, () => chat.collapseChat());
     bottomLeftDiv.appendChild(legendDiv);
+
+    const chatDiv = document.createElement('div');
+    chatDiv.id = 'chatDiv';
+    chat.initialize(chatDiv, () => collapseLegend());
+    bottomLeftDiv.appendChild(chatDiv);
 
     this.container = bottomLeftDiv;
     return bottomLeftDiv;

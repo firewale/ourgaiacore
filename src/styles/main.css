@@ -146,6 +146,12 @@ html, body {
     padding: 5px;
 }
 
+#bottomLeftControls {
+    display: flex;
+    align-items: flex-end;
+    gap: clamp(8px, 0.6vmin, 16px);
+}
+
 #legendDiv {
     margin: clamp(8px, 0.8vmin, 16px);
 }
@@ -208,6 +214,16 @@ html, body {
 
 .legend-bulk-btn:hover {
     background: #e0e0e0;
+}
+
+.legend-bulk-btn[aria-pressed="true"] {
+    background: #333;
+    color: #fff;
+    border-color: #333;
+}
+
+.legend-bulk-btn[aria-pressed="true"]:hover {
+    background: #444;
 }
 
 .legend-row {
@@ -304,9 +320,61 @@ html, body {
     background: #e0e0e0;
 }
 
+.legend-glyph-picker-btn {
+    font-size: clamp(14px, 0.9vmin, 20px);
+    background: #f0f0f0;
+    border: 1px solid #ccc;
+    border-radius: clamp(3px, 0.25vmin, 6px);
+    width: clamp(22px, 1.6vmin, 34px);
+    height: clamp(22px, 1.6vmin, 34px);
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0;
+}
+
+.legend-glyph-picker-btn:hover {
+    background: #e0e0e0;
+}
+
 .legend-edit-save:disabled {
     opacity: 0.5;
     cursor: default;
+}
+
+.legend-glyph-picker {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 2px;
+    width: 240px;
+    max-height: 200px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: clamp(4px, 0.3vmin, 8px);
+    padding: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    /* Escapes the legend panel's own overflow:auto clipping — positioned in
+       JS via getBoundingClientRect() of whichever input triggered it. */
+    z-index: 20;
+}
+
+.legend-glyph-picker[hidden] {
+    display: none;
+}
+
+.legend-glyph-option {
+    background: none;
+    border: none;
+    font-size: 18px;
+    line-height: 1.4;
+    padding: 2px;
+    cursor: pointer;
+    border-radius: clamp(3px, 0.25vmin, 6px);
+}
+
+.legend-glyph-option:hover {
+    background: #f0f0f0;
 }
 
 .legend-add-form {
@@ -316,6 +384,13 @@ html, body {
     margin-top: clamp(8px, 0.6vmin, 16px);
     padding-top: clamp(8px, 0.6vmin, 16px);
     border-top: 1px solid #e0e0e0;
+}
+
+/* The `hidden` attribute's default `display:none` is a UA-stylesheet rule,
+   which our own `display: flex` above (an author rule) otherwise overrides —
+   so this needs restating explicitly to actually hide the form. */
+.legend-add-form[hidden] {
+    display: none;
 }
 
 .legend-add-glyph,
