@@ -169,8 +169,18 @@ describe('GET /api/wikipedia', () => {
 
     expect(recordClassificationsMock).toHaveBeenCalledWith(
       [{ pageId: 43, title: 'Some Place', lat: 51.6, lng: -0.13, extract: 'A place.', rawCategories: null }],
-      [42]
+      []
     );
+  });
+
+  it('writes nothing to the uncategorized queue for a cached area with no uncategorized articles', async () => {
+    const cachedData = { 42: { title: 'Big Ben', lat: 51.5, long: -0.12, pageId: 42, extract: 'Clock tower.', category: 'historic' } };
+    mockRedis.get.mockResolvedValueOnce(JSON.stringify(cachedData));
+    vi.stubGlobal('fetch', vi.fn());
+
+    await request(makeApp()).get(`/?${BBOX_QS}`);
+
+    expect(recordClassificationsMock).not.toHaveBeenCalled();
   });
 
   it('calls Wikipedia with a gsbbox param and gslimit=500 on Redis cache miss, and stores result', async () => {

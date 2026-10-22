@@ -37,7 +37,8 @@ async function initMap(): Promise<void> {
       // Chained so a later filter can't overtake one still waiting on the fetch.
       filterQueue = filterQueue
         .then(() => (mode === 'only' ? categories.loadCategories() : undefined))
-        .then(() => map.applyCategoryFilter(mode, ids));
+        .then(() => map.applyCategoryFilter(mode, ids))
+        .catch((err) => console.error('Map filter failed:', err));
     },
     (mapId) => {
       map.showMapId(mapId);

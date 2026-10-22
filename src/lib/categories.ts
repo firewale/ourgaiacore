@@ -37,6 +37,13 @@ export async function initCategories(): Promise<void> {
       await seedDefaults(db);
       console.log('[categories] seeded categories table with built-in defaults');
     }
+    // Recording Studio was seeded with Ghost Town's color; move installs from
+    // before the fix onto its new one, unless something already uses that.
+    await db.query(
+      `UPDATE categories SET color = '#00ACC1'
+       WHERE id = 'recording-studio' AND color = '#4A148C'
+         AND NOT EXISTS (SELECT 1 FROM categories WHERE color = '#00ACC1')`
+    );
 
     const { rows } = await db.query<CategoryDef>('SELECT id, label, glyph, color FROM categories ORDER BY priority');
     if (rows.length > 0) {

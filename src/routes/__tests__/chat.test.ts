@@ -204,6 +204,24 @@ describe('POST /api/chat', () => {
     expect(followUp.messages[3].content).toContain('Moved map to Kyoto, Japan');
   });
 
+  it('keeps text the model streamed before its tool call in the follow-up history', async () => {
+    goToPlaceMock.mockResolvedValueOnce({ ok: true, lat: 35.0116, lng: 135.7681, zoom: 10, displayName: 'Kyoto, Japan' });
+    const toolCallBody = makeStreamingBody([
+      '{"message":{"content":"Flying you to Kyoto."},"done":false}\n',
+      '{"message":{"content":"","tool_calls":[{"function":{"name":"go_to_place","arguments":{"query":"Kyoto"}}}]},"done":true}\n',
+    ]);
+    const answerBody = makeStreamingBody(['{"message":{"content":" Here it is!"},"done":true}\n']);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, body: toolCallBody })
+      .mockResolvedValueOnce({ ok: true, body: answerBody });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await request(makeApp()).post('/').send({ messages: [{ role: 'user', content: 'Show me Kyoto' }], mapId: 'k3f9xq' });
+
+    const followUp = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(followUp.messages[2].content).toBe('Flying you to Kyoto.');
+  });
+
   it('passes a tool error back to the model so it can explain it', async () => {
     goToPlaceMock.mockResolvedValueOnce({ ok: false, error: 'No place found matching "Atlantis".' });
     const toolCallBody = makeStreamingBody([

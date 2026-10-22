@@ -109,10 +109,11 @@ async function runToolCalls(toolCalls: OllamaToolCall[], mapId: string): Promise
 async function pipeOllamaStream(
   body: ReadableStream<Uint8Array>,
   res: ExpressResponse
-): Promise<OllamaToolCall[]> {
+): Promise<{ content: string; toolCalls: OllamaToolCall[] }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   const toolCalls: OllamaToolCall[] = [];
+  let streamed = '';
   let buffer = '';
 
   try {
@@ -138,6 +139,7 @@ async function pipeOllamaStream(
         const content = parsed?.message?.content;
         if (typeof content === 'string' && content.length > 0) {
           res.write(`${JSON.stringify({ content })}\n`);
+          streamed += content;
         }
         if (Array.isArray(parsed?.message?.tool_calls)) {
           toolCalls.push(...(parsed.message.tool_calls as OllamaToolCall[]));
@@ -149,7 +151,7 @@ async function pipeOllamaStream(
     // client can detect the incomplete stream.
   }
 
-  return toolCalls;
+  return { content: streamed, toolCalls };
 }
 
 function isValidMessage(message: unknown): message is ChatMessage {
@@ -252,12 +254,13 @@ chatRouter.post('/', async (req, res) => {
       res.setHeader('Cache-Control', 'no-cache');
     }
 
-    const toolCalls = await pipeOllamaStream(ollamaRes.body, res);
+    const { content, toolCalls } = await pipeOllamaStream(ollamaRes.body, res);
     if (toolCalls.length === 0 || !offerTools || !mapId) break;
 
     outgoingMessages = [
       ...outgoingMessages,
-      { role: 'assistant', content: '', tool_calls: toolCalls },
+      // The text the user already saw this round, so the model doesn't repeat it.
+      { role: 'assistant', content, tool_calls: toolCalls },
       ...(await runToolCalls(toolCalls, mapId)),
     ];
   }

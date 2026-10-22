@@ -1,4 +1,5 @@
 import { getDbClient } from './dbClient.js';
+import { ensureArticleCategoryOverridesTable } from './articleCategoryOverrides.js';
 
 const CREATE_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS uncategorized_articles (
@@ -104,7 +105,8 @@ export async function removeUncategorized(pageIds: number[]): Promise<void> {
 // Most recently seen first. Throws if Postgres is unreachable so callers (the
 // MCP tool) can report it rather than claim there's nothing to do.
 export async function listUncategorized(limit: number): Promise<UncategorizedArticle[]> {
-  await ensureTable();
+  // Joined below, and possibly not created yet if Postgres came up after boot.
+  await Promise.all([ensureTable(), ensureArticleCategoryOverridesTable()]);
   const { rows } = await getDbClient().query<{
     page_id: string;
     title: string;

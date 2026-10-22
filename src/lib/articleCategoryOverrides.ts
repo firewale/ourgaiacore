@@ -18,7 +18,7 @@ export type OverrideSource = 'manual' | 'agent';
 // lock, so it mustn't run on every write. Retried on the next call if it fails
 // (e.g. Postgres came up after the server).
 let tableReady: Promise<void> | undefined;
-function ensureTable(): Promise<void> {
+export function ensureArticleCategoryOverridesTable(): Promise<void> {
   tableReady ??= getDbClient().query(CREATE_TABLE_SQL).then(
     () => undefined,
     (err: unknown) => {
@@ -39,7 +39,7 @@ export function _resetArticleCategoryOverridesForTests(): void {
 // edit or its removal takes effect immediately regardless of cache state.
 export async function initArticleCategoryOverrides(): Promise<void> {
   try {
-    await ensureTable();
+    await ensureArticleCategoryOverridesTable();
     console.log('[articleCategoryOverrides] table ready');
   } catch (err) {
     console.warn('[articleCategoryOverrides] Postgres unavailable at startup:', (err as Error).message);
@@ -67,7 +67,7 @@ export async function setCategoryOverride(
   category: ArticleCategory,
   source: OverrideSource = 'manual'
 ): Promise<boolean> {
-  await ensureTable();
+  await ensureArticleCategoryOverridesTable();
   const { rowCount } = await getDbClient().query(
     `INSERT INTO article_category_overrides (page_id, category, source, updated_at)
      VALUES ($1, $2, $3, now())

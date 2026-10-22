@@ -179,13 +179,14 @@ wikipediaRouter.get('/', async (req, res) => {
       if (cached) {
         console.log(`[wiki] geo cache hit for ${geoCacheKey}`);
         const data = JSON.parse(cached) as Record<number, WikiArticle>;
-        // Keep the uncategorized queue current for areas served from cache too
-        // (the cache doesn't keep raw Wikipedia categories).
-        const articles = Object.values(data);
-        void recordClassifications(
-          articles.filter((a) => a.category === 'default').map((a) => toUncategorized(a, null)),
-          articles.filter((a) => a.category !== 'default').map((a) => a.pageId)
-        );
+        // Areas served from cache still feed the uncategorized queue (without
+        // raw categories, which the cache doesn't keep). Only '?' articles are
+        // written, so panning over a cached area with none costs no DB work;
+        // categorized ones leave the queue on their next live classification.
+        const uncategorizedHits = Object.values(data).filter((a) => a.category === 'default');
+        if (uncategorizedHits.length > 0) {
+          void recordClassifications(uncategorizedHits.map((a) => toUncategorized(a, null)), []);
+        }
         const cachedOverrides = await getCategoryOverrides(Object.keys(data).map(Number));
         applyOverrides(data, cachedOverrides);
         writeChunk(data);
