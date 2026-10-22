@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { buildLegend, collapseLegend } from '../legend.js';
+import { buildLegend, collapseLegend, syncLegendCheckboxes } from '../legend.js';
 import { getCategories } from '../categories.js';
 import * as categoriesModule from '../categories.js';
 
@@ -225,6 +225,24 @@ describe('buildLegend', () => {
     expect((row.querySelector('.legend-swatch') as HTMLElement).hidden).toBe(false);
     expect((row.querySelector('.legend-edit-glyph') as HTMLElement).hidden).toBe(true);
     expect((row.querySelector('.legend-edit-btn') as HTMLElement).hidden).toBe(true);
+  });
+});
+
+describe('syncLegendCheckboxes', () => {
+  it('adds a row for a category loaded after the legend was built, then syncs it', () => {
+    buildLegend(container, onToggle);
+    expect(container.querySelector('.legend-checkbox[data-category="brewery"]')).toBeNull();
+    const brewery = { id: 'brewery', label: 'Brewery', glyph: '🍺', color: '#FFB300' };
+    vi.spyOn(categoriesModule, 'getCategories').mockReturnValue([...getCategories(), brewery]);
+
+    syncLegendCheckboxes(new Set(['brewery']));
+
+    const checkbox = checkboxFor('brewery');
+    expect(checkbox).not.toBeNull();
+    expect(checkbox.checked).toBe(false);
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change'));
+    expect(onToggle).toHaveBeenCalledWith('brewery', true);
   });
 });
 

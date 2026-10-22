@@ -316,6 +316,15 @@ describe('filter_map', () => {
     expect(tab.write).not.toHaveBeenCalled();
   });
 
+  it("doesn't resolve a filler word to the one label containing it", async () => {
+    const result = await (await connect('v2')).callTool({
+      name: 'filter_map',
+      arguments: { mapId: 'zzzzzz', mode: 'only', categories: ['and'] },
+    });
+    expect(result.isError).toBe(true);
+    expect((result.content as Array<{ text: string }>)[0].text).toContain('Unknown category: and');
+  });
+
   it('rejects unknown categories before checking the map id', async () => {
     const result = await (await connect('v2')).callTool({
       name: 'filter_map',

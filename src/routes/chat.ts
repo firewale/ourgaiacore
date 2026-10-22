@@ -70,19 +70,26 @@ function withoutMapId(schema: { properties?: Record<string, unknown>; required?:
   return { ...schema, properties, required: (schema.required ?? []).filter((name) => name !== 'mapId') };
 }
 
-export async function getOllamaTools(): Promise<OllamaTool[]> {
-  try {
-    const { tools } = await (await getMcpClient()).listTools();
-    return tools.filter((tool) => CHAT_TOOLS.has(tool.name)).map((tool) => ({
-      type: 'function',
-      function: { name: tool.name, description: tool.description, parameters: withoutMapId(tool.inputSchema) },
-    }));
-  } catch (err) {
-    // Chat still works without tools; retry the connection on the next request.
-    console.error('In-process MCP client unavailable:', err);
-    mcpClientPromise = null;
-    return [];
-  }
+// The tool list can't change while the process runs, so it's built once.
+let ollamaToolsPromise: Promise<OllamaTool[]> | null = null;
+
+export function getOllamaTools(): Promise<OllamaTool[]> {
+  ollamaToolsPromise ??= (async () => {
+    try {
+      const { tools } = await (await getMcpClient()).listTools();
+      return tools.filter((tool) => CHAT_TOOLS.has(tool.name)).map((tool): OllamaTool => ({
+        type: 'function',
+        function: { name: tool.name, description: tool.description, parameters: withoutMapId(tool.inputSchema) },
+      }));
+    } catch (err) {
+      // Chat still works without tools; retry the connection on the next request.
+      console.error('In-process MCP client unavailable:', err);
+      mcpClientPromise = null;
+      ollamaToolsPromise = null;
+      return [];
+    }
+  })();
+  return ollamaToolsPromise;
 }
 
 async function runToolCalls(toolCalls: OllamaToolCall[], mapId: string): Promise<OllamaMessage[]> {
@@ -222,6 +229,13 @@ chatRouter.post('/', async (req, res) => {
   let outgoingMessages: OllamaMessage[] = await buildOutgoingMessages(messages, req.body?.candidates);
   const tools = mapId && wantsMapAction(messages) ? await getOllamaTools() : [];
 
+  // Once the user abandons the reply (new chat, closed tab), stop streaming
+  // from Ollama and don't run tool calls — they'd change the map unasked.
+  const abort = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) abort.abort();
+  });
+
   for (let round = 0; ; round++) {
     const offerTools = tools.length > 0 && round < MAX_TOOL_ROUNDS;
 
@@ -236,8 +250,10 @@ chatRouter.post('/', async (req, res) => {
           stream: true,
           ...(offerTools ? { tools } : {}),
         }),
+        signal: abort.signal,
       });
     } catch {
+      if (abort.signal.aborted) return;
       if (!res.headersSent) res.status(502).json({ error: 'Ollama request failed' });
       else res.end();
       return;
@@ -255,6 +271,7 @@ chatRouter.post('/', async (req, res) => {
     }
 
     const { content, toolCalls } = await pipeOllamaStream(ollamaRes.body, res);
+    if (abort.signal.aborted) return;
     if (toolCalls.length === 0 || !offerTools || !mapId) break;
 
     outgoingMessages = [

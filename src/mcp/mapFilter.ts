@@ -20,6 +20,9 @@ const SYNONYMS: Record<string, string> = {
   shrine: 'worship',
 };
 
+// Words too common to pick a category by on their own ("and" in "Food and Drink").
+const FILLER_WORDS = new Set(['a', 'an', 'and', 'the', 'of', 'or', 'for', 'in', 'on', 'at', 'to', '&']);
+
 export function resolveCategory(name: string): { id: string; label: string } | undefined {
   const key = name.trim().toLowerCase();
   const candidates = [key, key.replace(/\s+/g, '-'), key.replace(/es$/, ''), key.replace(/s$/, '')];
@@ -31,7 +34,9 @@ export function resolveCategory(name: string): { id: string; label: string } | u
   const synonym = synonymId && all.find((c) => c.id === synonymId);
   if (synonym) return synonym;
 
-  const byWord = all.filter((c) => c.label.toLowerCase().split(/\s+/).some((word) => candidates.includes(word)));
+  const byWord = all.filter((c) =>
+    c.label.toLowerCase().split(/\s+/).some((word) => !FILLER_WORDS.has(word) && candidates.includes(word))
+  );
   return byWord.length === 1 ? byWord[0] : undefined;
 }
 

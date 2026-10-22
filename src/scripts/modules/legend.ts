@@ -4,10 +4,18 @@ import type { CategoryStyle } from './categories.js';
 let panelRef: HTMLElement | null = null;
 let toggleBtnRef: HTMLButtonElement | null = null;
 let checkboxesRef: HTMLInputElement[] = [];
+let addRowRef: ((category: CategoryStyle) => void) | null = null;
 
 // Reflects a filter applied from elsewhere (e.g. the chat's filter_map tool)
-// in the legend's checkboxes, without firing their change handlers.
+// in the legend's checkboxes, without firing their change handlers. Categories
+// loaded since the legend was built (an 'only' filter refreshes the list, which
+// may include ones added in another tab) get a row first, so a category the
+// filter hid can be shown again from here.
 export function syncLegendCheckboxes(hidden: ReadonlySet<string>): void {
+  const withRow = new Set(checkboxesRef.map((cb) => cb.dataset.category));
+  for (const category of categories.getCategories()) {
+    if (!withRow.has(category.id)) addRowRef?.(category);
+  }
   for (const cb of checkboxesRef) cb.checked = !hidden.has(cb.dataset.category!);
 }
 
@@ -381,6 +389,7 @@ export function buildLegend(
   }
 
   for (const category of categories.getCategories()) addRow(category);
+  addRowRef = addRow;
 
   // Compact add-category form: an emoji glyph plus a label, styled to match
   // the existing rows above it — new categories always start shown (like
