@@ -4,6 +4,7 @@ import { getCategoryRules, getTitleRules } from '../lib/categoryRules.js';
 import type { CategoryRuleRow } from '../lib/defaultCategoryRules.js';
 import { getCategoryOverrides, setCategoryOverride } from '../lib/articleCategoryOverrides.js';
 import { isValidCategoryId } from '../lib/categories.js';
+import { recordClassifications, type UncategorizedArticle } from '../lib/uncategorizedArticles.js';
 import type { ArticleCategory } from '../lib/articleCategory.js';
 
 export type { ArticleCategory } from '../lib/articleCategory.js';
@@ -63,6 +64,17 @@ function toDict(articles: WikiArticle[]): Record<number, WikiArticle> {
 // Manual per-article overrides always win over the keyword classifier —
 // applied at every point articles are written to the response, so an edit
 // takes effect immediately regardless of which cache layer served the data.
+function toUncategorized(article: WikiArticle, rawCategories: string[] | null): UncategorizedArticle {
+  return {
+    pageId: article.pageId,
+    title: article.title,
+    lat: article.lat,
+    lng: article.long,
+    extract: article.extract ?? null,
+    rawCategories,
+  };
+}
+
 function applyOverrides(record: Record<number, WikiArticle>, overrides: Map<number, ArticleCategory>): void {
   for (const [pageId, category] of overrides) {
     if (record[pageId]) record[pageId].category = category;
@@ -167,6 +179,13 @@ wikipediaRouter.get('/', async (req, res) => {
       if (cached) {
         console.log(`[wiki] geo cache hit for ${geoCacheKey}`);
         const data = JSON.parse(cached) as Record<number, WikiArticle>;
+        // Keep the uncategorized queue current for areas served from cache too
+        // (the cache doesn't keep raw Wikipedia categories).
+        const articles = Object.values(data);
+        void recordClassifications(
+          articles.filter((a) => a.category === 'default').map((a) => toUncategorized(a, null)),
+          articles.filter((a) => a.category !== 'default').map((a) => a.pageId)
+        );
         const cachedOverrides = await getCategoryOverrides(Object.keys(data).map(Number));
         applyOverrides(data, cachedOverrides);
         writeChunk(data);
@@ -219,6 +238,18 @@ wikipediaRouter.get('/', async (req, res) => {
   const newArticleData = new Map<number, { extract: string; category: ArticleCategory }>();
   const uncachedArticles: WikiArticle[] = [];
 
+  // Every article the classifier actually ran on this request (not fallbacks
+  // from a failed batch fetch), so the uncategorized queue stays accurate.
+  const uncategorized: UncategorizedArticle[] = [];
+  const categorizedPageIds: number[] = [];
+  const noteClassification = (article: WikiArticle, rawCategories: string[] | null): void => {
+    if (article.category !== 'default') {
+      categorizedPageIds.push(article.pageId);
+      return;
+    }
+    uncategorized.push(toUncategorized(article, rawCategories));
+  };
+
   try {
     await Promise.all(Object.values(items).map(async (article) => {
       const extractKey = `wiki:extract:${article.pageId}`;
@@ -239,6 +270,7 @@ wikipediaRouter.get('/', async (req, res) => {
               article.category = classifyByTitle(article.title);
               console.log(`[wiki] extract cache hit (legacy) for pageId ${article.pageId}`);
             }
+            noteClassification(article, null);
             return;
           }
           console.log(`[wiki] extract cache miss for pageId ${article.pageId}`);
@@ -303,6 +335,7 @@ wikipediaRouter.get('/', async (req, res) => {
           article.extract = extract;
           newArticleData.set(article.pageId, { extract, category: article.category });
         }
+        noteClassification(article, rawCats);
       }
       const resolved = toDict(batch);
       applyOverrides(resolved, overrides);
@@ -329,6 +362,8 @@ wikipediaRouter.get('/', async (req, res) => {
       redis.setex(`wiki:extract:${pageId}`, EXTRACT_TTL, JSON.stringify(data)).catch(() => {});
     }
   }
+
+  void recordClassifications(uncategorized, categorizedPageIds);
 
   res.end();
 });

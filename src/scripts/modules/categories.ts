@@ -38,7 +38,7 @@ const BUILTIN_CATEGORIES: CategoryStyle[] = [
   { id: 'tech', label: 'Tech', glyph: '💻', color: '#1565C0' },
   { id: 'performing-arts', label: 'Performing Arts', glyph: '🎭', color: '#880E4F' },
   { id: 'trail', label: 'Trail', glyph: '🥾', color: '#558B2F' },
-  { id: 'recording-studio', label: 'Recording Studio', glyph: '🎙', color: '#4A148C' },
+  { id: 'recording-studio', label: 'Recording Studio', glyph: '🎙', color: '#00ACC1' },
   { id: 'entertainment', label: 'Entertainment', glyph: '🎰', color: '#F9A825' },
 ];
 

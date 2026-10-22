@@ -3,6 +3,13 @@ import type { CategoryStyle } from './categories.js';
 
 let panelRef: HTMLElement | null = null;
 let toggleBtnRef: HTMLButtonElement | null = null;
+let checkboxesRef: HTMLInputElement[] = [];
+
+// Reflects a filter applied from elsewhere (e.g. the chat's filter_map tool)
+// in the legend's checkboxes, without firing their change handlers.
+export function syncLegendCheckboxes(hidden: ReadonlySet<string>): void {
+  for (const cb of checkboxesRef) cb.checked = !hidden.has(cb.dataset.category!);
+}
 
 export function collapseLegend(): void {
   if (!panelRef || !toggleBtnRef) return;
@@ -208,6 +215,7 @@ export function buildLegend(
   bulkRow.className = 'legend-bulk-row';
 
   const checkboxes: HTMLInputElement[] = [];
+  checkboxesRef = checkboxes;
 
   const allBtn = document.createElement('button');
   allBtn.className = 'legend-bulk-btn';

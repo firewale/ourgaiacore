@@ -7,7 +7,31 @@ const CREATE_TABLE_SQL = `
     category TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
+  ALTER TABLE article_category_overrides ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
 `;
+
+// Who set an override: a person via the marker popup, or an agent via the MCP
+// set_article_category tool — kept so agent edits can be audited or reverted.
+export type OverrideSource = 'manual' | 'agent';
+
+// Runs the create/migrate SQL once per process — the ALTER takes an exclusive
+// lock, so it mustn't run on every write. Retried on the next call if it fails
+// (e.g. Postgres came up after the server).
+let tableReady: Promise<void> | undefined;
+function ensureTable(): Promise<void> {
+  tableReady ??= getDbClient().query(CREATE_TABLE_SQL).then(
+    () => undefined,
+    (err: unknown) => {
+      tableReady = undefined;
+      throw err;
+    }
+  );
+  return tableReady;
+}
+
+export function _resetArticleCategoryOverridesForTests(): void {
+  tableReady = undefined;
+}
 
 // Per-article manual overrides, keyed by Wikipedia pageId — these win over
 // whatever the keyword-based classifier in categoryRules.ts would produce.
@@ -15,7 +39,7 @@ const CREATE_TABLE_SQL = `
 // edit or its removal takes effect immediately regardless of cache state.
 export async function initArticleCategoryOverrides(): Promise<void> {
   try {
-    await getDbClient().query(CREATE_TABLE_SQL);
+    await ensureTable();
     console.log('[articleCategoryOverrides] table ready');
   } catch (err) {
     console.warn('[articleCategoryOverrides] Postgres unavailable at startup:', (err as Error).message);
@@ -36,15 +60,20 @@ export async function getCategoryOverrides(pageIds: number[]): Promise<Map<numbe
   }
 }
 
-export async function setCategoryOverride(pageId: number, category: ArticleCategory): Promise<void> {
-  const db = getDbClient();
-  // Defensive: in case this is the very first write and the startup init
-  // didn't get a chance to create the table (e.g. Postgres came up late).
-  await db.query(CREATE_TABLE_SQL);
-  await db.query(
-    `INSERT INTO article_category_overrides (page_id, category, updated_at)
-     VALUES ($1, $2, now())
-     ON CONFLICT (page_id) DO UPDATE SET category = EXCLUDED.category, updated_at = now()`,
-    [pageId, category]
+// Returns false when an agent write was refused because a person already set
+// this article's category — manual overrides are never replaced by an agent.
+export async function setCategoryOverride(
+  pageId: number,
+  category: ArticleCategory,
+  source: OverrideSource = 'manual'
+): Promise<boolean> {
+  await ensureTable();
+  const { rowCount } = await getDbClient().query(
+    `INSERT INTO article_category_overrides (page_id, category, source, updated_at)
+     VALUES ($1, $2, $3, now())
+     ON CONFLICT (page_id) DO UPDATE SET category = EXCLUDED.category, source = EXCLUDED.source, updated_at = now()
+     WHERE EXCLUDED.source = 'manual' OR article_category_overrides.source = 'agent'`,
+    [pageId, category, source]
   );
+  return rowCount === 1;
 }

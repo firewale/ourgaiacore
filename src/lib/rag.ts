@@ -1,5 +1,5 @@
-const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
-const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL ?? 'nomic-embed-text';
+import { OLLAMA_EMBED_MODEL, OLLAMA_URL } from './ollamaConfig.js';
+
 const TOP_K = 5;
 const SIMILARITY_THRESHOLD = 0.3;
 const MAX_EXTRACT_CHARS = 500;

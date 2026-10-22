@@ -8,6 +8,7 @@ import * as wikipedia from './modules/wikipedia.js';
 import * as search from './modules/search.js';
 import * as map from './modules/map.js';
 import * as categories from './modules/categories.js';
+import * as mapEvents from './modules/mapEvents.js';
 
 // MapLibre's own worker-URL auto-detection breaks under both Vite's dev-server
 // dependency pre-bundling and Rollup's production build (the worker's sibling
@@ -26,6 +27,23 @@ async function initMap(): Promise<void> {
   // geolocation — which can take several seconds or the full 15s timeout —
   // then silently recenter once (if) the real location resolves.
   map.initialize(geolocation.DEFAULT_COORDINATE, marker, wikipedia, search, import.meta.env.VITE_MAP_STYLE_URL);
+  map.onViewChange(() => mapEvents.reportView(map.getView()));
+  let filterQueue: Promise<void> = Promise.resolve();
+  mapEvents.connect(
+    ({ lat, lng, zoom }) => map.navigateTo({ lat, lng }, zoom),
+    ({ mode, categories: ids }) => {
+      // 'only' hides every category but the named ones, so refresh the list
+      // first — another tab may have added categories since this one loaded.
+      // Chained so a later filter can't overtake one still waiting on the fetch.
+      filterQueue = filterQueue
+        .then(() => (mode === 'only' ? categories.loadCategories() : undefined))
+        .then(() => map.applyCategoryFilter(mode, ids));
+    },
+    (mapId) => {
+      map.showMapId(mapId);
+      mapEvents.reportView(map.getView());
+    }
+  );
   const coord = await geolocation.getCurrentPosition();
   map.recenterToUserLocation(coord);
 }

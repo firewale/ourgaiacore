@@ -1,0 +1,10 @@
+[
+  { "prompt": "What tools do you have available?", "expect": { "tool": null } },
+  { "prompt": "Tell me a fun fact about owls", "expect": { "tool": null } },
+  { "prompt": "Take me to Kyoto", "expect": { "tool": "go_to_place", "queryIncludes": "kyoto" } },
+  { "prompt": "Show me the Eiffel Tower", "expect": { "tool": "go_to_place", "queryIncludes": "eiffel" } },
+  { "prompt": "Only show museums and churches", "expect": { "tool": "filter_map", "mode": "only", "categories": ["museum", "worship"] } },
+  { "prompt": "Hide the parks", "expect": { "tool": "filter_map", "mode": "hide", "categories": ["park"] } },
+  { "prompt": "Show everything again", "expect": { "tool": "filter_map", "mode": "all" } },
+  { "prompt": "Can you show just the food places?", "expect": { "tool": "filter_map", "mode": "only", "categories": ["food-and-drink"] } }
+]

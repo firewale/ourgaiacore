@@ -1,20 +1,16 @@
 import { Router } from 'express';
 import { getRedisClient, isRedisReady } from '../lib/redisClient.js';
 import { throttledFetch } from '../lib/nominatimThrottle.js';
+import {
+  NEGATIVE_TTL,
+  NOMINATIM_URL,
+  NOMINATIM_USER_AGENT,
+  POSITIVE_TTL,
+  searchPlaces,
+  type GeocodePlace,
+} from '../lib/geocode.js';
 
 export const geocodeRouter = Router();
-
-const NOMINATIM_URL = process.env.NOMINATIM_URL ?? 'https://nominatim.openstreetmap.org';
-const NOMINATIM_USER_AGENT = process.env.NOMINATIM_USER_AGENT ?? 'OurGaiaCore/1.0 (contact: your-email@example.com)';
-
-const POSITIVE_TTL = 30 * 24 * 60 * 60; // 30 days — place names/addresses rarely move
-const NEGATIVE_TTL = 60 * 60; // 1 hour — don't permanently cache "not found" in case of a fixable typo
-
-interface GeocodePlace {
-  lat: number;
-  lon: number;
-  displayName: string;
-}
 
 geocodeRouter.get('/search', async (req, res) => {
   const q = (req.query.q as string | undefined)?.trim();
@@ -23,54 +19,14 @@ geocodeRouter.get('/search', async (req, res) => {
     return;
   }
 
-  const cacheKey = `geocode:search:${q.toLowerCase()}`;
-  if (isRedisReady()) {
-    try {
-      const cached = await getRedisClient().get(cacheKey);
-      if (cached) {
-        res.json(JSON.parse(cached));
-        return;
-      }
-    } catch {
-      // Redis error — fall through to Nominatim
-    }
-  }
-
-  const params = new URLSearchParams({ q, format: 'jsonv2', limit: '5' });
-
-  let apiRes: Response;
-  try {
-    apiRes = await throttledFetch(`${NOMINATIM_URL}/search?${params}`, {
-      headers: { 'User-Agent': NOMINATIM_USER_AGENT },
-    });
-  } catch {
-    res.status(502).json({ error: 'Nominatim request failed' });
+  const result = await searchPlaces(q);
+  if (result.status === 'rate-limited') { res.status(429).end(); return; }
+  if (result.status === 'error') {
+    if (result.message) res.status(502).json({ error: result.message });
+    else res.status(502).end();
     return;
   }
-
-  if (apiRes.status === 429) { res.status(429).end(); return; }
-  if (!apiRes.ok) { res.status(502).end(); return; }
-
-  let raw: Array<{ lat: string; lon: string; display_name: string }>;
-  try {
-    raw = await apiRes.json();
-  } catch {
-    res.status(502).json({ error: 'Nominatim returned unexpected response' });
-    return;
-  }
-
-  const results: GeocodePlace[] = raw.map((r) => ({
-    lat: parseFloat(r.lat),
-    lon: parseFloat(r.lon),
-    displayName: r.display_name,
-  }));
-
-  const payload = { results };
-  if (isRedisReady()) {
-    const ttl = results.length > 0 ? POSITIVE_TTL : NEGATIVE_TTL;
-    getRedisClient().setex(cacheKey, ttl, JSON.stringify(payload)).catch(() => {});
-  }
-  res.json(payload);
+  res.json({ results: result.results });
 });
 
 geocodeRouter.get('/reverse', async (req, res) => {
