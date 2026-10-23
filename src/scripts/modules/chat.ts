@@ -1,5 +1,7 @@
 import { showBanner } from './banner.js';
 import * as mapContext from './mapContext.js';
+import { toPlainExcerpt } from './candidateExcerpt.js';
+import { getMapId } from './mapEvents.js';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -24,7 +26,7 @@ export async function sendMessage(
   const candidates = mapContext.getVisibleArticles().map(({ pageId, title, extract, category }) => ({
     pageId,
     title,
-    extract,
+    extract: extract === undefined ? undefined : toPlainExcerpt(extract),
     category,
   }));
 
@@ -33,7 +35,8 @@ export async function sendMessage(
     res = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: history, candidates }),
+      // mapId lets the chat's map tools act on this tab's map only.
+      body: JSON.stringify({ messages: history, candidates, mapId: getMapId() }),
     });
   } catch (err) {
     console.error('Chat API request failed:', err);
@@ -112,9 +115,41 @@ function appendTypingIndicator(list: HTMLElement): HTMLElement {
   return bubble;
 }
 
+const WELCOME_TEXT =
+  'Hi! I can help you explore the map. Ask me to take you somewhere, ' +
+  'or ask about the Wikipedia landmarks you can see.';
+
+const EXAMPLE_PROMPTS = ['Take me to Kyoto', "What's interesting around here?", 'Show me the Eiffel Tower'];
+
+// Shown in an empty chat; it isn't a chat message, so it never enters history.
+function renderWelcome(list: HTMLElement, onPick: (prompt: string) => void): void {
+  const welcome = document.createElement('div');
+  welcome.className = 'chat-welcome';
+
+  const text = document.createElement('p');
+  text.className = 'chat-welcome-text';
+  text.textContent = WELCOME_TEXT;
+  welcome.appendChild(text);
+
+  const examples = document.createElement('div');
+  examples.className = 'chat-welcome-examples';
+  for (const prompt of EXAMPLE_PROMPTS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chat-welcome-example';
+    btn.textContent = prompt;
+    btn.addEventListener('click', () => onPick(prompt));
+    examples.appendChild(btn);
+  }
+  welcome.appendChild(examples);
+
+  list.appendChild(welcome);
+}
+
 let pillRef: HTMLButtonElement | null = null;
 let winRef: HTMLElement | null = null;
 let messageListRef: HTMLElement | null = null;
+let onPickExampleRef: ((prompt: string) => void) | null = null;
 
 export function collapseChat(): void {
   if (!pillRef || !winRef) return;
@@ -124,7 +159,9 @@ export function collapseChat(): void {
 
 export function newChat(): void {
   clearHistory();
-  if (messageListRef) messageListRef.innerHTML = '';
+  if (!messageListRef) return;
+  messageListRef.innerHTML = '';
+  if (onPickExampleRef) renderWelcome(messageListRef, onPickExampleRef);
 }
 
 export function initialize(container: HTMLElement, onOpen?: () => void): void {
@@ -206,6 +243,7 @@ export function initialize(container: HTMLElement, onOpen?: () => void): void {
 
     input.value = '';
     sendBtn.disabled = true;
+    messageList.querySelector('.chat-welcome')?.remove();
     appendMessageBubble(messageList, 'user', text);
 
     const typingBubble = appendTypingIndicator(messageList);
@@ -238,6 +276,13 @@ export function initialize(container: HTMLElement, onOpen?: () => void): void {
     if (e.key !== 'Enter') return;
     void send();
   });
+
+  onPickExampleRef = (prompt) => {
+    if (sendBtn.disabled) return;
+    input.value = prompt;
+    void send();
+  };
+  renderWelcome(messageList, onPickExampleRef);
 
   container.appendChild(pill);
   container.appendChild(win);

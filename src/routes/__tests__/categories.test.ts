@@ -70,6 +70,21 @@ describe('POST /api/categories', () => {
     expect(insertCall![1]).toEqual(['coffee-shop', 'Coffee Shop', '☕', res.body.color, 30]);
   });
 
+  it('assigns each new category a color no existing category uses', async () => {
+    for (const label of ['Lighthouse', 'Bridge']) {
+      const before = (await request(makeApp()).get('/')).body as Array<{ color: string }>;
+      mockQuery
+        .mockResolvedValueOnce({}) // CREATE TABLE IF NOT EXISTS
+        .mockResolvedValueOnce({ rows: [{ max: before.length - 1 }] }) // SELECT MAX(priority)
+        .mockResolvedValueOnce({}); // INSERT
+
+      const res = await request(makeApp()).post('/').send({ label, glyph: '🗼' });
+
+      expect(res.status).toBe(201);
+      expect(before.map(c => c.color)).not.toContain(res.body.color);
+    }
+  });
+
   it('returns 503 when Postgres is unavailable', async () => {
     mockQuery.mockRejectedValue(new Error('connection refused'));
     const res = await request(makeApp()).post('/').send({ label: 'Coffee Shop', glyph: '☕' });

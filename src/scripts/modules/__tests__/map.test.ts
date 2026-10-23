@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as map from '../map.js';
 import { showBanner } from '../banner.js';
+import * as chat from '../chat.js';
+import { getCategories } from '../categories.js';
 import type * as MarkerModule from '../marker.js';
 import type * as WikipediaModule from '../wikipedia.js';
 import type * as SearchModule from '../search.js';
@@ -59,6 +61,11 @@ const { FakeMap, getLastInstance, resetInstances } = vi.hoisted(() => {
 
     setZoom(z: number): void {
       this.zoomLevel = z;
+    }
+
+    flyTo({ center, zoom }: { center: [number, number]; zoom: number }): void {
+      this.center = center;
+      this.zoomLevel = zoom;
     }
 
     getContainer(): HTMLElement {
@@ -324,6 +331,43 @@ describe('recenterToUserLocation', () => {
   });
 });
 
+describe('navigateTo', () => {
+  it('flies to the coordinate at the given zoom', () => {
+    map.initialize({ lat: 0, lng: 0 }, fakeMarkerMod, fakeWikipediaMod, fakeSearchMod);
+    const instance = getLastInstance();
+
+    map.navigateTo({ lat: 35, lng: 135 }, 10);
+
+    expect(instance.center).toEqual([135, 35]);
+    expect(instance.zoomLevel).toBe(10);
+  });
+
+  it('keeps the chat conversation and the origin marker', () => {
+    map.initialize({ lat: 0, lng: 0 }, fakeMarkerMod, fakeWikipediaMod, fakeSearchMod);
+    const newChatSpy = vi.spyOn(chat, 'newChat');
+    vi.clearAllMocks();
+
+    map.navigateTo({ lat: 35, lng: 135 }, 10);
+
+    expect(newChatSpy).not.toHaveBeenCalled();
+    expect(fakeMarkerMod.placeMapMarker).not.toHaveBeenCalled();
+  });
+
+  it('stops a late geolocation fix from yanking the view back', () => {
+    map.initialize({ lat: 0, lng: 0 }, fakeMarkerMod, fakeWikipediaMod, fakeSearchMod);
+    const instance = getLastInstance();
+
+    map.navigateTo({ lat: 35, lng: 135 }, 10);
+    map.recenterToUserLocation({ lat: 10, lng: 20 });
+
+    expect(instance.center).toEqual([135, 35]);
+  });
+
+  it('does nothing before the map is initialized', () => {
+    expect(() => map.navigateTo({ lat: 35, lng: 135 }, 10)).not.toThrow();
+  });
+});
+
 describe('plotLandmarks', () => {
   it('adds markers for new articles and removes markers for articles no longer present', () => {
     map.initialize({ lat: 0, lng: 0 }, fakeMarkerMod, fakeWikipediaMod, fakeSearchMod);
@@ -410,5 +454,120 @@ describe('legend category filtering', () => {
     checkbox.dispatchEvent(new Event('change'));
 
     expect(museumMarker.addTo).toHaveBeenCalled();
+  });
+
+  it('applies a filter from the chat to markers and keeps the legend checkboxes in sync', () => {
+    map.initialize({ lat: 0, lng: 0 }, fakeMarkerMod, fakeWikipediaMod, fakeSearchMod);
+    const instance = getLastInstance();
+
+    const museumMarker = makeFakeMarker();
+    const parkMarker = makeFakeMarker();
+    const unknownMarker = makeFakeMarker();
+    (fakeMarkerMod.placeMapMarker as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(museumMarker)
+      .mockReturnValueOnce(parkMarker)
+      .mockReturnValueOnce(unknownMarker);
+
+    map.plotLandmarks({
+      1: { pageId: 1, title: 'Museum', lat: 1, long: 1, category: 'museum' },
+      2: { pageId: 2, title: 'Park', lat: 2, long: 2, category: 'park' },
+      3: { pageId: 3, title: 'Mystery', lat: 3, long: 3, category: 'default' },
+    });
+    const checkbox = (id: string) =>
+      instance.lastControlElement!.querySelector<HTMLInputElement>(`input[data-category="${id}"]`)!;
+
+    map.applyCategoryFilter('only', ['museum']);
+
+    expect(museumMarker.remove).not.toHaveBeenCalled();
+    expect(parkMarker.remove).toHaveBeenCalled();
+    expect(unknownMarker.remove).toHaveBeenCalled();
+    expect(checkbox('museum').checked).toBe(true);
+    expect(checkbox('park').checked).toBe(false);
+
+    map.applyCategoryFilter('show', ['park']);
+    expect(checkbox('park').checked).toBe(true);
+
+    map.applyCategoryFilter('hide', ['museum']);
+    expect(checkbox('museum').checked).toBe(false);
+
+    vi.mocked(parkMarker.addTo).mockClear();
+    map.applyCategoryFilter('all', []);
+    expect(checkbox('museum').checked).toBe(true);
+    expect(unknownMarker.addTo).toHaveBeenCalled();
+  });
+
+  it('restores uncategorized markers when the legend shows every category again after an "only" filter', () => {
+    map.initialize({ lat: 0, lng: 0 }, fakeMarkerMod, fakeWikipediaMod, fakeSearchMod);
+    const instance = getLastInstance();
+    const unknownMarker = makeFakeMarker();
+    (fakeMarkerMod.placeMapMarker as ReturnType<typeof vi.fn>).mockReturnValueOnce(unknownMarker);
+    map.plotLandmarks({ 3: { pageId: 3, title: 'Mystery', lat: 3, long: 3, category: 'default' } });
+
+    map.applyCategoryFilter('only', ['museum']);
+    expect(unknownMarker.remove).toHaveBeenCalled();
+
+    const allBtn = [...instance.lastControlElement!.querySelectorAll<HTMLButtonElement>('.legend-bulk-btn')]
+      .find((b) => b.textContent === 'All')!;
+    vi.mocked(unknownMarker.addTo).mockClear();
+    allBtn.click();
+
+    expect(unknownMarker.addTo).toHaveBeenCalled();
+  });
+
+  function plotUncategorized(): ReturnType<typeof makeFakeMarker> {
+    map.initialize({ lat: 0, lng: 0 }, fakeMarkerMod, fakeWikipediaMod, fakeSearchMod);
+    const unknownMarker = makeFakeMarker();
+    (fakeMarkerMod.placeMapMarker as ReturnType<typeof vi.fn>).mockReturnValueOnce(unknownMarker);
+    map.plotLandmarks({ 3: { pageId: 3, title: 'Mystery', lat: 3, long: 3, category: 'default' } });
+    return unknownMarker;
+  }
+
+  it('restores uncategorized markers when "show" brings back every category after an "only" filter', () => {
+    const unknownMarker = plotUncategorized();
+    const others = getCategories().map((c) => c.id).filter((id) => id !== 'museum');
+
+    map.applyCategoryFilter('only', ['museum']);
+    expect(unknownMarker.remove).toHaveBeenCalled();
+    expect(map.getView().hiddenCategories).toContain('default');
+
+    // Showing only some of the others keeps the filter — and '?' hidden.
+    vi.mocked(unknownMarker.addTo).mockClear();
+    map.applyCategoryFilter('show', others.slice(0, 1));
+    expect(unknownMarker.addTo).not.toHaveBeenCalled();
+    expect(map.getView().hiddenCategories).toContain('default');
+
+    map.applyCategoryFilter('show', others);
+    expect(unknownMarker.addTo).toHaveBeenCalled();
+    expect(map.getView().hiddenCategories).toEqual([]);
+  });
+
+  it('restores uncategorized markers on "all" after an "only" filter', () => {
+    const unknownMarker = plotUncategorized();
+    map.applyCategoryFilter('only', ['museum', 'park']);
+    map.applyCategoryFilter('hide', ['park']);
+    expect(map.getView().hiddenCategories).toContain('default');
+
+    vi.mocked(unknownMarker.addTo).mockClear();
+    map.applyCategoryFilter('all', []);
+    expect(unknownMarker.addTo).toHaveBeenCalled();
+    expect(map.getView().hiddenCategories).toEqual([]);
+  });
+
+  it('never hides uncategorized markers from legend toggles or "hide" alone', () => {
+    const unknownMarker = plotUncategorized();
+    const instance = getLastInstance();
+    const checkbox = instance.lastControlElement!.querySelector<HTMLInputElement>('input[data-category="museum"]')!;
+
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event('change'));
+    map.applyCategoryFilter('hide', ['park']);
+    expect(unknownMarker.remove).not.toHaveBeenCalled();
+    expect(map.getView().hiddenCategories.sort()).toEqual(['museum', 'park']);
+
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change'));
+    map.applyCategoryFilter('show', ['park']);
+    expect(unknownMarker.remove).not.toHaveBeenCalled();
+    expect(map.getView().hiddenCategories).toEqual([]);
   });
 });

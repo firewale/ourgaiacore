@@ -10,10 +10,14 @@ import { wikipediaRouter } from './routes/wikipedia.js';
 import { chatRouter } from './routes/chat.js';
 import { geocodeRouter } from './routes/geocode.js';
 import { categoriesRouter } from './routes/categories.js';
+import { mapEventsRouter } from './routes/mapEvents.js';
+import { mcpRouter } from './routes/mcp.js';
+import { healthRouter } from './routes/health.js';
 import { getRedisClient } from './lib/redisClient.js';
 import { initCategoryRules } from './lib/categoryRules.js';
 import { initArticleCategoryOverrides } from './lib/articleCategoryOverrides.js';
 import { initCategories } from './lib/categories.js';
+import { initUncategorizedArticles } from './lib/uncategorizedArticles.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,13 +36,18 @@ app.use(helmet({
   },
 }));
 app.use(morgan('dev'));
-app.use(express.json());
+// Chat requests carry trimmed excerpts of every visible landmark (up to ~500)
+// as RAG candidates, which can exceed the 100kb default.
+app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 app.use('/api/wikipedia', wikipediaRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/geocode', geocodeRouter);
 app.use('/api/categories', categoriesRouter);
+app.use('/api/map-events', mapEventsRouter);
+app.use('/api/health', healthRouter);
+app.use('/mcp', mcpRouter);
 
 // Eagerly initialize Redis so the connection can become ready before requests arrive.
 getRedisClient();
@@ -49,6 +58,7 @@ getRedisClient();
 initCategoryRules();
 initArticleCategoryOverrides();
 initCategories();
+initUncategorizedArticles();
 
 // In production (after `npm run build`), serve the Vite-built client from dist/client/.
 // In dev, Vite's own dev server handles the frontend at :5173.

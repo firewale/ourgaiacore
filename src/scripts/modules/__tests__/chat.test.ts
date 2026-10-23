@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { sendMessage, clearHistory, newChat, initialize, collapseChat, type ChatSendStatus } from '../chat.js';
 import { setVisibleArticles } from '../mapContext.js';
 
+vi.mock('../mapEvents.js', () => ({ getMapId: () => 'k3f9xq' }));
+
 function makeStreamingResponse(lines: string[], ok = true) {
   const encoder = new TextEncoder();
   let i = 0;
@@ -42,6 +44,8 @@ describe('sendMessage', () => {
     expect(url).toBe('/api/chat');
     const body = JSON.parse(options.body as string);
     expect(body.messages).toEqual([{ role: 'user', content: 'Hello' }]);
+    // So the chat's map tools act on this tab's map only.
+    expect(body.mapId).toBe('k3f9xq');
   });
 
   it('sends an empty candidates array when no landmarks are visible', async () => {
@@ -69,8 +73,22 @@ describe('sendMessage', () => {
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body.candidates).toEqual([
-      { pageId: 42, title: 'City Museum', extract: '<p>A museum.</p>', category: 'museum' },
+      { pageId: 42, title: 'City Museum', extract: 'A museum.', category: 'museum' },
     ]);
+  });
+
+  it('trims candidate extracts to short plain-text excerpts', async () => {
+    setVisibleArticles([
+      { title: 'Long Article', lat: 1, long: 2, pageId: 7, extract: `<p>${'word '.repeat(1000)}</p>`, category: 'museum' },
+    ]);
+    const fetchMock = vi.fn().mockResolvedValueOnce(makeStreamingResponse(['{"content":"Ok"}\n']));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendMessage('Tell me more', vi.fn());
+
+    const [candidate] = JSON.parse(fetchMock.mock.calls[0][1].body as string).candidates;
+    expect(candidate.extract).not.toContain('<p>');
+    expect(candidate.extract.length).toBeLessThanOrEqual(500);
   });
 
   it('invokes onUpdate with the accumulated text for each chunk and returns ok', async () => {
@@ -219,10 +237,39 @@ describe('initialize', () => {
     newChatBtn.click();
 
     expect(container.querySelectorAll('#chat-messages .chat-message')).toHaveLength(0);
+    expect(container.querySelector('#chat-messages .chat-welcome')).not.toBeNull();
 
     await sendMessage('Fresh start', vi.fn());
     const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
     expect(secondBody.messages).toEqual([{ role: 'user', content: 'Fresh start' }]);
+  });
+
+  it('shows a welcome message with example prompts in an empty chat', () => {
+    const container = document.createElement('div');
+    initialize(container);
+
+    const welcome = container.querySelector('#chat-messages .chat-welcome');
+    expect(welcome).not.toBeNull();
+    expect(welcome?.querySelectorAll('.chat-welcome-example').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('#chat-messages .chat-message')).toHaveLength(0);
+  });
+
+  it('clicking an example prompt sends it and removes the welcome message', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(makeStreamingResponse(['{"content":"Off we go!"}\n']));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const container = document.createElement('div');
+    initialize(container);
+    const example = container.querySelector('.chat-welcome-example') as HTMLButtonElement;
+    const prompt = example.textContent;
+    example.click();
+
+    expect(container.querySelector('.chat-welcome')).toBeNull();
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll('#chat-messages .chat-message')).toHaveLength(2);
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.messages).toEqual([{ role: 'user', content: prompt }]);
   });
 
   it('calls onOpen when the pill is clicked', () => {

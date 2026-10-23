@@ -37,6 +37,13 @@ export async function initCategories(): Promise<void> {
       await seedDefaults(db);
       console.log('[categories] seeded categories table with built-in defaults');
     }
+    // Recording Studio was seeded with Ghost Town's color; move installs from
+    // before the fix onto its new one, unless something already uses that.
+    await db.query(
+      `UPDATE categories SET color = '#00ACC1'
+       WHERE id = 'recording-studio' AND color = '#4A148C'
+         AND NOT EXISTS (SELECT 1 FROM categories WHERE color = '#00ACC1')`
+    );
 
     const { rows } = await db.query<CategoryDef>('SELECT id, label, glyph, color FROM categories ORDER BY priority');
     if (rows.length > 0) {
@@ -53,11 +60,21 @@ function slugify(label: string): string {
   return label.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'category';
 }
 
-// New categories cycle through the built-in palette (by current category
-// count) so user-added categories stay visually consistent with the
-// existing set instead of needing a manual color picker.
+// Extra colors beyond the built-in categories' own, chosen to stay distinct
+// from them so user-added categories don't reuse a built-in's color.
+const EXTRA_COLORS = [
+  '#D32F2F', '#827717', '#212121', '#26A69A', '#C0CA33',
+  '#F06292', '#FFB300', '#8D6E63', '#FF7043', '#78909C',
+  '#29B6F6', '#9CCC65', '#004D40', '#FDD835', '#AD7FA8',
+];
+const PALETTE = [...new Set([...DEFAULT_CATEGORIES.map(c => c.color), ...EXTRA_COLORS])];
+
+// New categories take the first palette color no current category uses, so
+// user-added categories stay visually consistent with the existing set
+// without a manual color picker. Only once every color is taken does it cycle.
 function nextColor(): string {
-  return DEFAULT_CATEGORIES[categories.length % DEFAULT_CATEGORIES.length].color;
+  const used = new Set(categories.map(c => c.color.toUpperCase()));
+  return PALETTE.find(c => !used.has(c)) ?? PALETTE[categories.length % PALETTE.length];
 }
 
 export async function addCategory(label: string, glyph: string): Promise<CategoryDef> {

@@ -14,8 +14,12 @@ vi.mock('../../lib/redisClient.js', () => ({
   isRedisReady: () => redisReady,
 }));
 
+vi.mock('../../lib/uncategorizedArticles.js', () => ({ recordClassifications: vi.fn() }));
+
 // Import after mock setup
 const { wikipediaRouter } = await import('../wikipedia.js');
+const { recordClassifications } = await import('../../lib/uncategorizedArticles.js');
+const recordClassificationsMock = vi.mocked(recordClassifications);
 
 function makeApp() {
   const app = express();
@@ -44,8 +48,15 @@ function makeArticleResponse(pageId: number, extract: string, categories: string
 // each batch of articles resolves) rather than a single JSON object, so tests
 // merge all lines back into one dict to assert against — equivalent to what
 // the old single-JSON-body response represented.
-function parseNdjson(text: string): Record<string, unknown> {
-  const merged: Record<string, unknown> = {};
+interface ArticleChunk {
+  title?: string;
+  extract?: string;
+  category?: string;
+  [key: string]: unknown;
+}
+
+function parseNdjson(text: string): Record<string, ArticleChunk> {
+  const merged: Record<string, ArticleChunk> = {};
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
     if (trimmed) Object.assign(merged, JSON.parse(trimmed));
@@ -64,6 +75,44 @@ beforeEach(() => {
 });
 
 describe('GET /api/wikipedia', () => {
+  it('records unclassifiable articles (with raw categories) and classified ones for the uncategorized queue', async () => {
+    mockRedis.get.mockResolvedValue(null);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([
+        { title: 'Mystery Spot', lat: 51.5, lon: -0.12, pageid: 7 },
+        { title: 'British Museum', lat: 51.52, lon: -0.127, pageid: 8 },
+      ]) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
+        query: {
+          pages: {
+            7: { extract: '<p>Odd.</p>', categories: [{ title: 'Category:Unusual places' }] },
+            8: { extract: '<p>Museum.</p>', categories: [{ title: 'Category:Museums in London' }] },
+          },
+        },
+      }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await request(makeApp()).get(`/?${BBOX_QS}`);
+
+    expect(recordClassificationsMock).toHaveBeenCalledWith(
+      [{ pageId: 7, title: 'Mystery Spot', lat: 51.5, lng: -0.12, extract: '<p>Odd.</p>', rawCategories: ['Unusual places'] }],
+      [8]
+    );
+  });
+
+  it('does not record articles whose batch fetch failed (they were never classified)', async () => {
+    mockRedis.get.mockResolvedValue(null);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeGeoResponse([{ title: 'Mystery Spot', lat: 51.5, lon: -0.12, pageid: 7 }]) })
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await request(makeApp()).get(`/?${BBOX_QS}`);
+
+    expect(recordClassificationsMock).toHaveBeenCalledWith([], []);
+  });
+
   it('returns 400 when bounds are missing', async () => {
     vi.stubGlobal('fetch', vi.fn());
     const res = await request(makeApp()).get('/');
@@ -106,6 +155,32 @@ describe('GET /api/wikipedia', () => {
     expect(parseNdjson(res.text)).toEqual(cachedData);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mockRedis.setex).not.toHaveBeenCalled();
+  });
+
+  it('updates the uncategorized queue for articles served from the geo cache', async () => {
+    const cachedData = {
+      42: { title: 'Big Ben', lat: 51.5, long: -0.12, pageId: 42, extract: 'Clock tower.', category: 'historic' },
+      43: { title: 'Some Place', lat: 51.6, long: -0.13, pageId: 43, extract: 'A place.', category: 'default' },
+    };
+    mockRedis.get.mockResolvedValueOnce(JSON.stringify(cachedData));
+    vi.stubGlobal('fetch', vi.fn());
+
+    await request(makeApp()).get(`/?${BBOX_QS}`);
+
+    expect(recordClassificationsMock).toHaveBeenCalledWith(
+      [{ pageId: 43, title: 'Some Place', lat: 51.6, lng: -0.13, extract: 'A place.', rawCategories: null }],
+      []
+    );
+  });
+
+  it('writes nothing to the uncategorized queue for a cached area with no uncategorized articles', async () => {
+    const cachedData = { 42: { title: 'Big Ben', lat: 51.5, long: -0.12, pageId: 42, extract: 'Clock tower.', category: 'historic' } };
+    mockRedis.get.mockResolvedValueOnce(JSON.stringify(cachedData));
+    vi.stubGlobal('fetch', vi.fn());
+
+    await request(makeApp()).get(`/?${BBOX_QS}`);
+
+    expect(recordClassificationsMock).not.toHaveBeenCalled();
   });
 
   it('calls Wikipedia with a gsbbox param and gslimit=500 on Redis cache miss, and stores result', async () => {

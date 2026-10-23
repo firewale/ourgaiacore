@@ -6,7 +6,7 @@ import * as geolocation from './geolocation.js';
 import type { Coordinate, Bounds } from './coordinate.js';
 import { toLngLat } from './coordinate.js';
 import { showBanner, hideBanner } from './banner.js';
-import { buildLegend, collapseLegend } from './legend.js';
+import { buildLegend, collapseLegend, syncLegendCheckboxes } from './legend.js';
 import * as chat from './chat.js';
 import * as mapContext from './mapContext.js';
 import * as loadingBar from './loadingBar.js';
@@ -346,6 +346,18 @@ let userInteracted = false;
 
 const markerRegistry = new Map<number, { marker: Marker; category: wikipedia.ArticleCategory }>();
 const hiddenCategories = new Set<wikipedia.ArticleCategory>();
+let viewChangeListener: (() => void) | undefined;
+
+// Called after the map moves or its category filter changes — main.ts uses it
+// to report the view to the server for MCP's list_maps.
+export function onViewChange(listener: () => void): void {
+  viewChangeListener = listener;
+}
+
+export function getView(): { lat: number; lng: number; zoom: number; hiddenCategories: string[] } {
+  const center = map.getCenter();
+  return { lat: center.lat, lng: center.lng, zoom: map.getZoom(), hiddenCategories: [...hiddenCategories] };
+}
 
 function filterByCategories(hidden: Set<wikipedia.ArticleCategory>): void {
   markerRegistry.forEach(({ marker: m, category }) => {
@@ -355,6 +367,39 @@ function filterByCategories(hidden: Set<wikipedia.ArticleCategory>): void {
       m.addTo(map);
     }
   });
+}
+
+export type CategoryFilterMode = 'only' | 'show' | 'hide' | 'all';
+
+// Uncategorized ('?') markers have no legend row and filter_map can't name
+// them, so their visibility is derived rather than set directly: 'only' hides
+// them, and they come back as soon as no real category is hidden — by
+// whichever path (legend, 'show', 'all') got there.
+function settleUncategorized(): void {
+  if (hiddenCategories.size === 1 && hiddenCategories.has('default')) hiddenCategories.delete('default');
+}
+
+// Applies a filter sent from the server (the chat's / MCP's filter_map tool) —
+// the same hidden-category state the legend checkboxes drive, kept in sync.
+export function applyCategoryFilter(mode: CategoryFilterMode, ids: string[]): void {
+  if (mode === 'all') {
+    hiddenCategories.clear();
+  } else if (mode === 'only') {
+    hiddenCategories.clear();
+    for (const { id } of categories.getCategories()) {
+      if (!ids.includes(id)) hiddenCategories.add(id);
+    }
+    hiddenCategories.add('default');
+  } else {
+    for (const id of ids) {
+      if (mode === 'hide') hiddenCategories.add(id);
+      else hiddenCategories.delete(id);
+    }
+  }
+  settleUncategorized();
+  filterByCategories(hiddenCategories);
+  syncLegendCheckboxes(hiddenCategories);
+  viewChangeListener?.();
 }
 
 class BottomLeftControl implements IControl {
@@ -372,7 +417,9 @@ class BottomLeftControl implements IControl {
     buildLegend(legendDiv, (category, enabled) => {
       const cat = category as wikipedia.ArticleCategory;
       enabled ? hiddenCategories.delete(cat) : hiddenCategories.add(cat);
+      settleUncategorized();
       filterByCategories(hiddenCategories);
+      viewChangeListener?.();
     }, () => chat.collapseChat());
     bottomLeftDiv.appendChild(legendDiv);
 
@@ -389,6 +436,59 @@ class BottomLeftControl implements IControl {
     this.container?.remove();
     this.container = undefined;
   }
+}
+
+// Shows this tab's map id (see mapEvents.ts) so the user can hand it to an
+// MCP client — tools only ever change the map whose id they're given.
+class MapIdControl implements IControl {
+  private container: HTMLDivElement | undefined;
+
+  onAdd(): HTMLElement {
+    const container = document.createElement('div');
+    container.id = 'map-id';
+    container.className = 'maplibregl-ctrl';
+    container.hidden = true;
+    container.title = 'Give this id to an AI assistant (MCP client) so it can move and filter this map';
+
+    const label = document.createElement('span');
+    label.id = 'map-id-label';
+    container.appendChild(label);
+
+    const copy = document.createElement('button');
+    copy.id = 'map-id-copy';
+    copy.type = 'button';
+    copy.textContent = 'Copy';
+    copy.setAttribute('aria-label', 'Copy map id');
+    copy.addEventListener('click', () => {
+      const id = container.dataset.mapId;
+      if (!id) return;
+      navigator.clipboard?.writeText(id).then(
+        () => {
+          copy.textContent = 'Copied';
+          setTimeout(() => (copy.textContent = 'Copy'), 1500);
+        },
+        (err) => console.error('Copying map id failed:', err)
+      );
+    });
+    container.appendChild(copy);
+
+    this.container = container;
+    return container;
+  }
+
+  onRemove(): void {
+    this.container?.remove();
+    this.container = undefined;
+  }
+}
+
+export function showMapId(id: string): void {
+  const container = document.getElementById('map-id');
+  const label = document.getElementById('map-id-label');
+  if (!container || !label) return;
+  container.dataset.mapId = id;
+  label.textContent = `Map id: ${id}`;
+  container.hidden = false;
 }
 
 export function initialize(
@@ -498,8 +598,19 @@ export function setPosition(coord: Coordinate): void {
   chat.newChat();
 }
 
+// Called for MCP-driven navigation (see mapEvents.ts). Unlike setPosition it
+// leaves the chat history alone — the chat may be what asked for the move —
+// and doesn't move the "You are here" origin marker. The idle handler
+// refetches Wikipedia once the flight settles.
+export function navigateTo(coord: Coordinate, zoom: number): void {
+  if (!mapInitialized) return;
+  userInteracted = true;
+  map.flyTo({ center: toLngLat(coord), zoom });
+}
+
 function setupClickEvents(): void {
   // Debounce idle so rapid panning/zooming doesn't flood the Wikipedia API.
+  map.on('moveend', () => viewChangeListener?.());
   map.on('idle', () => {
     clearTimeout(idleDebounce);
     idleDebounce = setTimeout(() => void fetchWikipediaForCurrentView(), 800);
@@ -543,6 +654,7 @@ function setupCustomControls(searchMod: typeof search): void {
 
   map.getContainer().appendChild(homeDiv);
 
+  map.addControl(new MapIdControl(), 'bottom-right');
   map.addControl(new BottomLeftControl(), 'bottom-left');
 }
 
@@ -550,6 +662,7 @@ export function _resetMapStateForTests(): void {
   mapInitialized = false;
   markerRegistry.clear();
   hiddenCategories.clear();
+  viewChangeListener = undefined;
   wikipediaRateLimited = false;
   originMarker = undefined;
   userInteracted = false;
